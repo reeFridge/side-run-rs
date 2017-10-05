@@ -1,0 +1,8 @@
+[package]
+name = "side-run"
+version = "0.1.0"
+authors = ["reeFridge <reefridgerator@gmail.com>"]
+
+[dependencies]
+ggez = "0.3"
+byteorder = "1"
