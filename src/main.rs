@@ -1,8 +1,10 @@
 //extern crate ggez;
 //extern crate byteorder;
 extern crate piston_window;
+mod scenes;
 
 use piston_window::*;
+use scenes::play;
 
 /*use ggez::conf;
 use ggez::Context;
@@ -24,6 +26,7 @@ pub fn main() {
     };
 
     event::run(ctx, state).unwrap();*/
+
     let mut window: PistonWindow = WindowSettings::new("side-run", [800, 600])
         .resizable(true)
         .exit_on_esc(true)
@@ -31,6 +34,8 @@ pub fn main() {
         .unwrap();
 
     let mut rotation: f64 = 0.0;
+
+    let mut state = play::State::new().unwrap();
 
     while let Some(e) = window.next() {
         e.update(|&UpdateArgs { dt }| {
