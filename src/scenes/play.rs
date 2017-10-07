@@ -9,6 +9,7 @@
 //use connection::{Connection, NetToken, EventType};
 type GameResult<T> = Result<T, String>;
 use piston_window::types::Color;
+use piston_window::*;
 
 struct Point<T> {
     vec: [T; 2]
@@ -220,93 +221,83 @@ impl State {
         }
     }*/
 
-/*    pub fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
-        graphics::set_background_color(ctx, BLACK);
-        graphics::clear(ctx);
+    pub fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d) -> GameResult<()> {
+        clear(BLACK, graphics);
 
         for obj in self.objects.iter() {
-            graphics::set_color(ctx, obj.color.clone())?;
             let screen_pos = self.viewport.convert_world_pos(obj.pos.clone());
-            graphics::rectangle(ctx, DrawMode::Fill, Rect::new(
-                screen_pos.x,
-                screen_pos.y,
-                20.0,
-                20.0
-            ))?;
+            let pos = ctx.transform.trans(screen_pos.x().clone() as f64, screen_pos.y().clone() as f64);
+            let square = rectangle::square(0., 0., 20.);
+            rectangle(WHITE, square, pos, graphics);
         }
 
         //Side-scroll area
-        graphics::set_color(ctx, Color::from((0, 0, 255)))?;
-        graphics::rectangle(ctx, DrawMode::Line, Rect::new(
-            self.free_area.w,
-            self.free_area.h,
-            self.free_area.w,
-            self.free_area.h
-        ))?;
+        let pos = ctx.transform.trans(self.free_area.top_left.x().clone() as f64, self.free_area.top_left.y().clone() as f64);
+        let square = rectangle::rectangle_by_corners(0., 0., self.free_area.bottom_right.x().clone() as f64, self.free_area.bottom_right.y().clone() as f64);
+        let area_border = Rectangle::new_border([0., 0., 1., 0.1], 0.5);
+        area_border.draw(square, &ctx.draw_state, pos, graphics);
 
-        let world_edges = vec![
-            self.viewport.convert_world_pos(Point::new(0.0, 0.0)),
-            self.viewport.convert_world_pos(Point::new(W_WIDTH, 0.0)),
-            self.viewport.convert_world_pos(Point::new(W_WIDTH, W_HEIGHT)),
-            self.viewport.convert_world_pos(Point::new(0.0, W_HEIGHT))
+        let world = vec![
+            self.viewport.convert_world_pos(Point::<f32>::new(0., 0.)),
+            self.viewport.convert_world_pos(Point::<f32>::new(W_WIDTH, W_HEIGHT)),
         ];
 
         //World area
-        graphics::set_color(ctx, Color::from((255, 255, 255)))?;
-        graphics::polygon(ctx, DrawMode::Line, &world_edges)?;
-
-        graphics::present(ctx);
+        let pos = ctx.transform.trans(world[0].x().clone() as f64, world[0].y().clone() as f64);
+        let square = rectangle::rectangle_by_corners(0., 0., world[1].x().clone() as f64, world[1].y().clone() as f64);
+        let area_border = Rectangle::new_border(WHITE, 0.5);
+        area_border.draw(square, &ctx.draw_state, pos, graphics);
         Ok(())
     }
 
-    pub fn key_down_event(&mut self, _keycode: Keycode, _: Mod, _repeat: bool) {
-        match self.player() {
-            Some(ref mut player) => {
-                match _keycode {
-                    Keycode::Up => player.move_to(Direction::Up, 10.0),
-                    Keycode::Down => player.move_to(Direction::Down, 10.0),
-                    Keycode::Left => player.move_to(Direction::Left, 10.0),
-                    Keycode::Right => player.move_to(Direction::Right, 10.0),
-                    _ => None
-                }
-            },
-            None => None
-        }.and_then(|new_pos| {
-            if let Some(ref mut connection) = self.connection {
-                connection.send_update_pos_event(new_pos).unwrap();
-            }
-
-            Some(())
-        }).or_else(|| {
-            match _keycode {
-                Keycode::Space => {
-                    let token = match self.connection {
-                        Some(Connection { ref token, .. }) => token.clone(),
-                        None => 0 as NetToken
-                    };
-
-                    //                    let name = "Fratyz".to_string();
-                    //                    let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
-                    //                    let color = Color::from((255, 0, 255));
-
-                    //                    let name = "Reef".to_string();
-                    //                    let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
-                    //                    let color = Color::from((0, 255, 0));
-
-                    let name = "Fridge".to_string();
-                    let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
-                    let color = Color::from((255, 0, 0));
-
-                    self.spawn_player(token, name.clone(), start_pos.clone(), color.clone());
-
-                    if let Some(ref mut connection) = self.connection {
-                        connection.send_spawn_event(name, start_pos, color).unwrap();
+    /*    pub fn key_down_event(&mut self, _keycode: Keycode, _: Mod, _repeat: bool) {
+            match self.player() {
+                Some(ref mut player) => {
+                    match _keycode {
+                        Keycode::Up => player.move_to(Direction::Up, 10.0),
+                        Keycode::Down => player.move_to(Direction::Down, 10.0),
+                        Keycode::Left => player.move_to(Direction::Left, 10.0),
+                        Keycode::Right => player.move_to(Direction::Right, 10.0),
+                        _ => None
                     }
                 },
-                _ => ()
-            };
+                None => None
+            }.and_then(|new_pos| {
+                if let Some(ref mut connection) = self.connection {
+                    connection.send_update_pos_event(new_pos).unwrap();
+                }
 
-            None
-        });
-    }*/
+                Some(())
+            }).or_else(|| {
+                match _keycode {
+                    Keycode::Space => {
+                        let token = match self.connection {
+                            Some(Connection { ref token, .. }) => token.clone(),
+                            None => 0 as NetToken
+                        };
+
+                        //                    let name = "Fratyz".to_string();
+                        //                    let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
+                        //                    let color = Color::from((255, 0, 255));
+
+                        //                    let name = "Reef".to_string();
+                        //                    let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
+                        //                    let color = Color::from((0, 255, 0));
+
+                        let name = "Fridge".to_string();
+                        let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
+                        let color = Color::from((255, 0, 0));
+
+                        self.spawn_player(token, name.clone(), start_pos.clone(), color.clone());
+
+                        if let Some(ref mut connection) = self.connection {
+                            connection.send_spawn_event(name, start_pos, color).unwrap();
+                        }
+                    },
+                    _ => ()
+                };
+
+                None
+            });
+        }*/
 }

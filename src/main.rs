@@ -1,19 +1,8 @@
-//extern crate ggez;
-//extern crate byteorder;
 extern crate piston_window;
 mod scenes;
 
 use piston_window::*;
 use scenes::play;
-
-/*use ggez::conf;
-use ggez::Context;
-use ggez::event;
-
-mod connection;
-mod scenes;
-
-use scenes::play;*/
 
 pub fn main() {
 /*    let c = conf::Conf::new();
@@ -42,12 +31,8 @@ pub fn main() {
             rotation += 3.0 * dt;
         });
 
-        window.draw_2d(&e, |ctx, graph| {
-            clear([0., 0., 0., 1.], graph);
-            let center = ctx.transform.trans(400., 300.);
-            let square = rectangle::square(0., 0., 100.);
-            let red = [1., 0., 0., 1.];
-            rectangle(red, square, center.rot_rad(rotation).trans(-50.0, -50.0), graph);
+        window.draw_2d(&e, |mut ctx, mut graph| {
+            state.draw(&mut ctx,&mut graph);
         });
     }
 }
