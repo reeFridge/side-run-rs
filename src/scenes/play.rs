@@ -1,48 +1,43 @@
-//use ggez::event::{EventHandler, Keycode, Mod};
-//use ggez::{Context};
-//use ggez::graphics;
-//use ggez::graphics::{Point, DrawMode, Rect, Color};
-//use std::time::Duration;
-//use std::net::TcpStream;
-//use std::io::{Read};
+use std::net::TcpStream;
+use std::io::{Read};
 use std::collections::HashMap;
-//use connection::{Connection, NetToken, EventType};
+use connection::{Connection, NetToken, EventType};
 type GameResult<T> = Result<T, String>;
-type NetToken = usize;
+
 
 use piston_window::types::Color;
 use piston_window::*;
 
-struct Point<T> {
+pub struct Point<T> {
     vec: [T; 2]
 }
 
 impl<T: Clone> Point<T> {
-    fn new(x: T, y: T) -> Self {
+    pub fn new(x: T, y: T) -> Self {
         Point { vec: [x, y] }
     }
 
-    fn x(&self) -> &T {
+    pub fn x(&self) -> &T {
         &self.vec[0]
     }
 
-    fn y(&self) -> &T {
+    pub fn y(&self) -> &T {
         &self.vec[1]
     }
 
-    fn set(&mut self, point: Point<T>) {
+    pub fn set(&mut self, point: Point<T>) {
         self.vec = point.vec;
     }
 
-    fn set_x(&mut self, x: T) {
+    pub fn set_x(&mut self, x: T) {
         self.vec[0] = x;
     }
 
-    fn set_y(&mut self, y: T) {
+    pub fn set_y(&mut self, y: T) {
         self.vec[1] = y;
     }
 
-    fn clone(&self) -> Point<T> {
+    pub fn clone(&self) -> Point<T> {
         Point { vec: [self.x().clone(), self.y().clone()] }
     }
 }
@@ -152,8 +147,8 @@ pub struct State {
     free_area: Rect<f32>,
     viewport: ViewPort,
     objects: Vec<GameObject>,
-    players: HashMap<NetToken, Player>
-    //connection: Option<Connection>
+    players: HashMap<NetToken, Player>,
+    connection: Option<Connection>
 }
 
 impl State {
@@ -168,8 +163,8 @@ impl State {
             objects: objects,
             viewport: ViewPort::new(0.0, 0.0),
             players: HashMap::new(),
-            free_area: Rect::<f32>::new(200., 150., 600., 450.)
-            //connection: None
+            free_area: Rect::<f32>::new(200., 150., 600., 450.),
+            connection: None
         };
 
         Ok(s)
@@ -208,54 +203,44 @@ impl State {
 
             Some(())
         });
-        /*
 
-                let mut buf = [0u8; 64];
-                if let Some(Connection { ref mut socket, .. }) = self.connection {
-                    socket.set_read_timeout(Some(Duration::from_millis(10))).unwrap();
-
-                    match socket.read(&mut buf) {
-                        Ok(_) => {
-                            let (event, raw_data) = buf.split_at(5);
-
-                            Some((Connection::parse_event_type(&event), raw_data))
-                        },
-                        Err(_) => None
+        if let Some(ref mut connection) = self.connection {
+            connection.listen_events()
+        } else {
+            None
+        }
+            .and_then(|(event_type, data)| {
+                match event_type {
+                    EventType::Spawn => {
+                        let (token, name, pos, color) = Connection::parse_spawn_event(data).unwrap();
+                        self.spawn_player(token, name, pos, color);
+                    },
+                    EventType::UpdatePos => {
+                        let (token, pos) = Connection::parse_update_pos_event(data).unwrap();
+                        self.update_player_pos(token, pos);
                     }
-                } else { None }.and_then(|(event_type, raw_data)| {
-                    match event_type {
-                        Some(EventType::Spawn) => {
-                            let (token, name, pos, color) = Connection::parse_spawn_event(&raw_data).unwrap();
-                            self.spawn_player(token, name, pos, color);
-                        },
-                        Some(EventType::UpdatePos) => {
-                            let (token, pos) = Connection::parse_update_pos_event(&raw_data).unwrap();
-                            self.update_player_pos(token, pos);
-                        },
-                        None => ()
-                    };
+                };
 
-                    Some(())
-                });
-        */
+                Some(())
+            });
 
         Ok(())
     }
 
-    /*    pub fn connect(&mut self, host: String) -> Result<(), String> {
-            match TcpStream::connect(host) {
-                Ok(stream) => match Connection::new(stream) {
-                    Ok(connection) => {
-                        println!("connection established, net_token= {}", connection.token);
-                        self.connection = Some(connection);
+    pub fn connect(&mut self, host: String) -> Result<(), String> {
+        match TcpStream::connect(host) {
+            Ok(stream) => match Connection::new(stream) {
+                Ok(connection) => {
+                    println!("connection established, net_token= {}", connection.token);
+                    self.connection = Some(connection);
 
-                        Ok(())
-                    },
-                    Err(err) => Err(err)
+                    Ok(())
                 },
-                Err(e) => Err(format!("{:?}", e.kind()))
-            }
-        }*/
+                Err(err) => Err(err)
+            },
+            Err(e) => Err(format!("{:?}", e.kind()))
+        }
+    }
 
     fn spawn_player(&mut self, token: NetToken, name: String, pos: Point<f32>, color: Color) {
         let idx = self.objects.len();
@@ -266,24 +251,23 @@ impl State {
             obj_index: idx
         });
     }
-    /*
-        fn update_player_pos(&mut self, token: NetToken, new_pos: Point) {
-            match self.players.get_mut(&token) {
-                Some(&mut Player { obj_index: ref idx, .. }) => self.objects.get_mut(idx.clone()),
-                None => None
-            }.and_then(|obj| {
-                obj.pos = new_pos;
 
-                Some(())
-            });
-        }*/
+    fn update_player_pos(&mut self, token: NetToken, new_pos: Point<f32>) {
+        match self.players.get_mut(&token) {
+            Some(&mut Player { obj_index: ref idx, .. }) => self.objects.get_mut(idx.clone()),
+            None => None
+        }.and_then(|obj| {
+            obj.pos = new_pos;
+
+            Some(())
+        });
+    }
 
     fn player(&mut self) -> Option<&mut GameObject> {
-        //        let token = match self.connection {
-        //            Some(Connection { ref token, .. }) => token.clone(),
-        //            None => 0 as NetToken
-        //        };
-        let token = 0 as NetToken;
+        let token = match self.connection {
+            Some(Connection { ref token, .. }) => token.clone(),
+            None => 0 as NetToken
+        };
 
         match self.players.get_mut(&token) {
             Some(&mut Player { obj_index: ref idx, .. }) => self.objects.get_mut(idx.clone()),
@@ -331,6 +315,7 @@ impl State {
     }
 
     pub fn key_press(&mut self, button: Button) {
+        //TODO: Fix handling space key only if player not spawned
         if let Button::Keyboard(key) = button {
             match self.player() {
                 Some(ref mut player) => {
@@ -344,38 +329,35 @@ impl State {
                 }
                 None => None
             }.and_then(|new_pos| {
-                //            if let Some(ref mut connection) = self.connection {
-                //                connection.send_update_pos_event(new_pos).unwrap();
-                //            }
+                if let Some(ref mut connection) = self.connection {
+                    connection.send_update_pos_event(new_pos).unwrap();
+                }
 
                 Some(())
             }).or_else(|| {
                 match key {
                     Key::Space => {
-                        //                    let token = match self.connection {
-                        //                        Some(Connection { ref token, .. }) => token.clone(),
-                        //                        None => 0 as NetToken
-                        //                    };
-                        /*
+                        let token = match self.connection {
+                            Some(Connection { ref token, .. }) => token.clone(),
+                            None => 0 as NetToken
+                        };
 
-                                                let name = "Fratyz".to_string();
-                                                let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
-                                                let color = Color::from((255, 0, 255));
-
-                                                let name = "Reef".to_string();
-                                                let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
-                                                let color = Color::from((0, 255, 0));
-                        */
-
-                        let token = 0 as NetToken;
-                        let name = "Fridge".to_string();
                         let start_pos = Point::<f32>::new(400., 300.);
 
-                        self.spawn_player(token, name, start_pos, RED);
+//                        let name = "Fratyz".to_string();
+//                        let color = BLUE;
 
-                        //                    if let Some(ref mut connection) = self.connection {
-                        //                        connection.send_spawn_event(name, start_pos, color).unwrap();
-                        //                    }
+//                        let name = "Reef".to_string();
+//                        let color = GREEN;
+
+                        let name = "Fridge".to_string();
+                        let color = RED;
+
+                        self.spawn_player(token, name.clone(), start_pos.clone(), color);
+
+                        if let Some(ref mut connection) = self.connection {
+                            connection.send_spawn_event(name, start_pos, color).unwrap();
+                        }
                     }
                     _ => ()
                 };
