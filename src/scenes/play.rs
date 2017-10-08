@@ -9,6 +9,7 @@ use std::collections::HashMap;
 //use connection::{Connection, NetToken, EventType};
 type GameResult<T> = Result<T, String>;
 type NetToken = usize;
+
 use piston_window::types::Color;
 use piston_window::*;
 
@@ -124,9 +125,9 @@ impl GameObject {
         let y = self.pos.y().clone();
 
         let intersect = (y - units < 0.0) as u8 |
-            (((y + units > W_HEIGHT) as u8) << 1) |
+            (((y + units > W_HEIGHT - 20.) as u8) << 1) |
             (((x - units < 0.0) as u8) << 2) |
-            (((x + units > W_WIDTH) as u8) << 3);
+            (((x + units > W_WIDTH - 20.) as u8) << 3);
 
         let intersect = (intersect >> direction.clone() as u8) & 1 == 1;
 
@@ -187,9 +188,9 @@ impl State {
             let free_area = &self.free_area;
 
             let intersect = (y < free_area.top_left.y().clone()) as u8 |
-                (((y > free_area.bottom_right.y().clone()) as u8) << 1) |
+                (((y > free_area.bottom_right.y().clone() - 20.) as u8) << 1) |
                 (((x < free_area.top_left.x().clone()) as u8) << 2) |
-                (((x > free_area.bottom_right.x().clone()) as u8) << 3);
+                (((x > free_area.bottom_right.x() - 20.) as u8) << 3);
 
             if (intersect >> Direction::Up as u8) & 1 == 1 {
                 Some((Direction::Up, units))
@@ -207,54 +208,54 @@ impl State {
 
             Some(())
         });
-/*
+        /*
 
-        let mut buf = [0u8; 64];
-        if let Some(Connection { ref mut socket, .. }) = self.connection {
-            socket.set_read_timeout(Some(Duration::from_millis(10))).unwrap();
+                let mut buf = [0u8; 64];
+                if let Some(Connection { ref mut socket, .. }) = self.connection {
+                    socket.set_read_timeout(Some(Duration::from_millis(10))).unwrap();
 
-            match socket.read(&mut buf) {
-                Ok(_) => {
-                    let (event, raw_data) = buf.split_at(5);
+                    match socket.read(&mut buf) {
+                        Ok(_) => {
+                            let (event, raw_data) = buf.split_at(5);
 
-                    Some((Connection::parse_event_type(&event), raw_data))
-                },
-                Err(_) => None
-            }
-        } else { None }.and_then(|(event_type, raw_data)| {
-            match event_type {
-                Some(EventType::Spawn) => {
-                    let (token, name, pos, color) = Connection::parse_spawn_event(&raw_data).unwrap();
-                    self.spawn_player(token, name, pos, color);
-                },
-                Some(EventType::UpdatePos) => {
-                    let (token, pos) = Connection::parse_update_pos_event(&raw_data).unwrap();
-                    self.update_player_pos(token, pos);
-                },
-                None => ()
-            };
+                            Some((Connection::parse_event_type(&event), raw_data))
+                        },
+                        Err(_) => None
+                    }
+                } else { None }.and_then(|(event_type, raw_data)| {
+                    match event_type {
+                        Some(EventType::Spawn) => {
+                            let (token, name, pos, color) = Connection::parse_spawn_event(&raw_data).unwrap();
+                            self.spawn_player(token, name, pos, color);
+                        },
+                        Some(EventType::UpdatePos) => {
+                            let (token, pos) = Connection::parse_update_pos_event(&raw_data).unwrap();
+                            self.update_player_pos(token, pos);
+                        },
+                        None => ()
+                    };
 
-            Some(())
-        });
-*/
+                    Some(())
+                });
+        */
 
         Ok(())
     }
 
-/*    pub fn connect(&mut self, host: String) -> Result<(), String> {
-        match TcpStream::connect(host) {
-            Ok(stream) => match Connection::new(stream) {
-                Ok(connection) => {
-                    println!("connection established, net_token= {}", connection.token);
-                    self.connection = Some(connection);
+    /*    pub fn connect(&mut self, host: String) -> Result<(), String> {
+            match TcpStream::connect(host) {
+                Ok(stream) => match Connection::new(stream) {
+                    Ok(connection) => {
+                        println!("connection established, net_token= {}", connection.token);
+                        self.connection = Some(connection);
 
-                    Ok(())
+                        Ok(())
+                    },
+                    Err(err) => Err(err)
                 },
-                Err(err) => Err(err)
-            },
-            Err(e) => Err(format!("{:?}", e.kind()))
-        }
-    }*/
+                Err(e) => Err(format!("{:?}", e.kind()))
+            }
+        }*/
 
     fn spawn_player(&mut self, token: NetToken, name: String, pos: Point<f32>, color: Color) {
         let idx = self.objects.len();
@@ -278,10 +279,10 @@ impl State {
         }*/
 
     fn player(&mut self) -> Option<&mut GameObject> {
-//        let token = match self.connection {
-//            Some(Connection { ref token, .. }) => token.clone(),
-//            None => 0 as NetToken
-//        };
+        //        let token = match self.connection {
+        //            Some(Connection { ref token, .. }) => token.clone(),
+        //            None => 0 as NetToken
+        //        };
         let token = 0 as NetToken;
 
         match self.players.get_mut(&token) {
@@ -301,19 +302,29 @@ impl State {
         }
 
         //Side-scroll area
-        let pos = ctx.transform.trans(self.free_area.top_left.x().clone() as f64, self.free_area.top_left.y().clone() as f64);
-        let square = rectangle::rectangle_by_corners(0., 0., self.free_area.bottom_right.x().clone() as f64, self.free_area.bottom_right.y().clone() as f64);
+        let square = rectangle::rectangle_by_corners(
+            self.free_area.top_left.x().clone() as f64,
+            self.free_area.top_left.y().clone() as f64,
+            self.free_area.bottom_right.x().clone() as f64,
+            self.free_area.bottom_right.y().clone() as f64
+        );
         let area_border = Rectangle::new_border([0., 0., 1., 0.1], 0.5);
-        area_border.draw(square, &ctx.draw_state, pos, graphics);
+        area_border.draw(square, &ctx.draw_state, ctx.transform.clone(), graphics);
 
         let world = vec![
             self.viewport.convert_world_pos(Point::<f32>::new(0., 0.)),
             self.viewport.convert_world_pos(Point::<f32>::new(W_WIDTH, W_HEIGHT))
         ];
+        let view_pos = self.viewport.pos.clone();
 
         //World area
         let pos = ctx.transform.trans(world[0].x().clone() as f64, world[0].y().clone() as f64);
-        let square = rectangle::rectangle_by_corners(0., 0., world[1].x().clone() as f64, world[1].y().clone() as f64);
+        let square = rectangle::rectangle_by_corners(
+            0.,
+            0.,
+            (world[1].x() + view_pos.x()) as f64,
+            (world[1].y() + view_pos.y()) as f64
+        );
         let area_border = Rectangle::new_border(WHITE, 0.5);
         area_border.draw(square, &ctx.draw_state, pos, graphics);
         Ok(())
@@ -330,7 +341,7 @@ impl State {
                         Key::Right => player.move_to(Direction::Right, 10.0),
                         _ => None
                     }
-                },
+                }
                 None => None
             }.and_then(|new_pos| {
                 //            if let Some(ref mut connection) = self.connection {
@@ -365,7 +376,7 @@ impl State {
                         //                    if let Some(ref mut connection) = self.connection {
                         //                        connection.send_spawn_event(name, start_pos, color).unwrap();
                         //                    }
-                    },
+                    }
                     _ => ()
                 };
 
