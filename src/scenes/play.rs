@@ -167,11 +167,78 @@ impl State {
             objects: objects,
             viewport: ViewPort::new(0.0, 0.0),
             players: HashMap::new(),
-            free_area: Rect::<f32>::new(200., 150., 400., 300.)
+            free_area: Rect::<f32>::new(200., 150., 600., 450.)
             //connection: None
         };
 
         Ok(s)
+    }
+
+    pub fn update(&mut self, dt: f64) -> GameResult<()> {
+        match self.player() {
+            Some(&mut GameObject { pos: ref player_pos, .. }) => Some(player_pos.clone()),
+            None => None
+        }.and_then(|world| {
+            let units = 10.;
+            let local = self.viewport.convert_world_pos(world.clone());
+            let x = local.x().clone();
+            let y = local.y().clone();
+
+            let free_area = &self.free_area;
+
+            let intersect = (y < free_area.top_left.y().clone()) as u8 |
+                (((y > free_area.bottom_right.y().clone()) as u8) << 1) |
+                (((x < free_area.top_left.x().clone()) as u8) << 2) |
+                (((x > free_area.bottom_right.x().clone()) as u8) << 3);
+
+            if (intersect >> Direction::Up as u8) & 1 == 1 {
+                Some((Direction::Up, units))
+            } else if (intersect >> Direction::Down as u8) & 1 == 1 {
+                Some((Direction::Down, units))
+            } else if (intersect >> Direction::Left as u8) & 1 == 1 {
+                Some((Direction::Left, units))
+            } else if (intersect >> Direction::Right as u8) & 1 == 1 {
+                Some((Direction::Right, units))
+            } else {
+                None
+            }
+        }).and_then(|(direction, units)| {
+            self.viewport.move_to(direction, units);
+
+            Some(())
+        });
+/*
+
+        let mut buf = [0u8; 64];
+        if let Some(Connection { ref mut socket, .. }) = self.connection {
+            socket.set_read_timeout(Some(Duration::from_millis(10))).unwrap();
+
+            match socket.read(&mut buf) {
+                Ok(_) => {
+                    let (event, raw_data) = buf.split_at(5);
+
+                    Some((Connection::parse_event_type(&event), raw_data))
+                },
+                Err(_) => None
+            }
+        } else { None }.and_then(|(event_type, raw_data)| {
+            match event_type {
+                Some(EventType::Spawn) => {
+                    let (token, name, pos, color) = Connection::parse_spawn_event(&raw_data).unwrap();
+                    self.spawn_player(token, name, pos, color);
+                },
+                Some(EventType::UpdatePos) => {
+                    let (token, pos) = Connection::parse_update_pos_event(&raw_data).unwrap();
+                    self.update_player_pos(token, pos);
+                },
+                None => ()
+            };
+
+            Some(())
+        });
+*/
+
+        Ok(())
     }
 
 /*    pub fn connect(&mut self, host: String) -> Result<(), String> {
@@ -241,7 +308,7 @@ impl State {
 
         let world = vec![
             self.viewport.convert_world_pos(Point::<f32>::new(0., 0.)),
-            self.viewport.convert_world_pos(Point::<f32>::new(W_WIDTH, W_HEIGHT)),
+            self.viewport.convert_world_pos(Point::<f32>::new(W_WIDTH, W_HEIGHT))
         ];
 
         //World area

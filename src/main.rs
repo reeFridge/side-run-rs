@@ -25,6 +25,10 @@ pub fn main() {
     let mut state = play::State::new().unwrap();
 
     while let Some(e) = window.next() {
+        e.update(|&UpdateArgs { dt }| {
+            state.update(dt);
+        });
+
         match e {
             Event::Input(Input::Button(ButtonArgs { state: button_state, button, .. })) => {
                 match button_state {
