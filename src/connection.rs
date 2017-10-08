@@ -1,7 +1,9 @@
 use std::net::TcpStream;
 use byteorder::{ByteOrder, BigEndian};
-use ggez::graphics::{Point, Color};
+use std::time::Duration;
+use scenes::play::Point;
 use std::io::{Read, Write};
+use piston_window::types::Color;
 
 pub type NetToken = usize;
 
@@ -28,17 +30,56 @@ impl Connection {
         }
     }
 
-    pub fn send_spawn_event(&mut self, name: String, pos: Point, color: Color) -> Result<(), String> {
+    pub fn listen_events(&mut self) -> Option<(EventType, String)> {
+        let mut buf = [0u8; 64];
+        self.socket.set_read_timeout(Some(Duration::from_millis(10))).unwrap();
+
+        match self.socket.read(&mut buf) {
+            Ok(_) => {
+                let (event, raw_data) = buf.split_at(5);
+                let data = String::from_utf8_lossy(&raw_data).into_owned();
+
+                match Connection::parse_event_type(&event) {
+                    Some(e) => Some((e, data)),
+                    None => None
+                }
+            },
+            Err(_) => None
+        }
+    }
+
+    pub fn send_spawn_event(&mut self, name: String, pos: Point<f32>, color: Color) -> Result<(), String> {
         let token = self.token.clone();
-        self.socket.write_all(format!("SPWN {}|{}|{}x{}|{}\r\n", token, name, pos.x, pos.y, u32::from(color)).as_bytes()).unwrap();
+        let x = pos.x().clone();
+        let y = pos.y().clone();
+
+        let u32_color = {
+            let to_255 = 255f32;
+            let r = color[0] * to_255;
+            let g = color[1] * to_255;
+            let b = color[2] * to_255;
+            let a = color[3] * to_255;
+
+            let rp = (r as u32) << 24;
+            let gp = (g as u32) << 16;
+            let bp = (b as u32) << 8;
+            let ap = a as u32;
+
+            (rp | gp | bp | ap)
+        };
+
+
+        self.socket.write_all(format!("SPWN {}|{}|{}x{}|{}\r\n", token, name, x, y, u32_color).as_bytes()).unwrap();
         self.socket.flush().unwrap();
 
         Ok(())
     }
 
-    pub fn send_update_pos_event(&mut self, pos: Point) -> Result<(), String> {
+    pub fn send_update_pos_event(&mut self, pos: Point<f32>) -> Result<(), String> {
+        let x = pos.x().clone();
+        let y = pos.y().clone();
         let token = self.token.clone();
-        self.socket.write_all(format!("UPDP {}|{}x{}\r\n", token, pos.x, pos.y).as_bytes()).unwrap();
+        self.socket.write_all(format!("UPDP {}|{}x{}\r\n", token, x, y).as_bytes()).unwrap();
         self.socket.flush().unwrap();
 
         Ok(())
@@ -55,35 +96,35 @@ impl Connection {
         }
     }
 
-    pub fn parse_update_pos_event(buf: &[u8]) -> Result<(usize, Point), String> {
-        let cow_str = String::from_utf8_lossy(buf).into_owned();
-        let str: Vec<&str> = cow_str.as_str().split("\r\n").collect();
+    pub fn parse_update_pos_event(data: String) -> Result<(usize, Point<f32>), String> {
+        let str: Vec<&str> = data.as_str().split("\r\n").collect();
         let data_str = str[0].trim();
         let data_parts: Vec<&str> = data_str.split("|").collect();
         let token = data_parts[0].parse::<u64>().expect("token") as usize;
         let coords: Vec<&str> = data_parts[1].split("x").collect();
-        let pos = Point::new(coords[0].parse::<f32>().expect("x"), coords[1].parse::<f32>().expect("y"));
+        let pos = Point::<f32>::new(coords[0].parse::<f32>().expect("x"), coords[1].parse::<f32>().expect("y"));
 
         Ok((token, pos))
     }
 
-    pub fn parse_spawn_event(buf: &[u8]) -> Result<(usize, String, Point, Color), String> {
-        let cow_str = String::from_utf8_lossy(buf).into_owned();
-        let str: Vec<&str> = cow_str.as_str().split("\r\n").collect();
+    pub fn parse_spawn_event(data: String) -> Result<(usize, String, Point<f32>, Color), String> {
+        let str: Vec<&str> = data.as_str().split("\r\n").collect();
         let data_str = str[0].trim();
         let data_parts: Vec<&str> = data_str.split("|").collect();
         let token = data_parts[0].parse::<u64>().expect("token") as usize;
         let name = data_parts[1].to_string();
         let coords: Vec<&str> = data_parts[2].split("x").collect();
-        let pos = Point::new(coords[0].parse::<f32>().expect("x"), coords[1].parse::<f32>().expect("y"));
+        let pos = Point::<f32>::new(coords[0].parse::<f32>().expect("x"), coords[1].parse::<f32>().expect("y"));
         let color_u = data_parts[3].parse::<u32>().expect("color");
+
+        let inv_255 = 1.0f32 / 255.0f32;
         let color = {
             let rp = (color_u >> 24) as u8;
             let gp = (color_u >> 16) as u8;
             let bp = (color_u >> 8) as u8;
             let ap = color_u as u8;
 
-            Color::from((rp, gp, bp, ap))
+            [rp as f32 * inv_255, gp as f32 * inv_255, bp as f32 * inv_255, ap as f32 * inv_255]
         };
 
         Ok((token, name, pos, color))
