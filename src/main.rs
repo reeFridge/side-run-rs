@@ -22,14 +22,18 @@ pub fn main() {
         .build()
         .unwrap();
 
-    let mut rotation: f64 = 0.0;
-
     let mut state = play::State::new().unwrap();
 
     while let Some(e) = window.next() {
-        e.update(|&UpdateArgs { dt }| {
-            rotation += 3.0 * dt;
-        });
+        match e {
+            Event::Input(Input::Button(ButtonArgs { state: button_state, button, .. })) => {
+                match button_state {
+                    ButtonState::Press => state.key_press(button),
+                    _ => ()
+                }
+            },
+            _ => ()
+        };
 
         window.draw_2d(&e, |mut ctx, mut graph| {
             state.draw(&mut ctx,&mut graph);

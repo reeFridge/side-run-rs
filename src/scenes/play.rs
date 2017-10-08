@@ -5,9 +5,10 @@
 //use std::time::Duration;
 //use std::net::TcpStream;
 //use std::io::{Read};
-//use std::collections::HashMap;
+use std::collections::HashMap;
 //use connection::{Connection, NetToken, EventType};
 type GameResult<T> = Result<T, String>;
+type NetToken = usize;
 use piston_window::types::Color;
 use piston_window::*;
 
@@ -139,19 +140,19 @@ impl GameObject {
     }
 }
 
+struct Player {
+    name: String,
+    obj_index: usize
+}
+
 // if connection is not established player will be at   players[0]
 // else controllable player will be at                  players[connection.token]
 pub struct State {
     free_area: Rect<f32>,
     viewport: ViewPort,
     objects: Vec<GameObject>,
-    //players: HashMap<NetToken, Player>,
+    players: HashMap<NetToken, Player>
     //connection: Option<Connection>
-}
-
-struct Player {
-    name: String,
-    obj_index: usize
 }
 
 impl State {
@@ -165,7 +166,7 @@ impl State {
         let s = State {
             objects: objects,
             viewport: ViewPort::new(0.0, 0.0),
-            //players: HashMap::new(),
+            players: HashMap::new(),
             free_area: Rect::<f32>::new(200., 150., 400., 300.)
             //connection: None
         };
@@ -188,38 +189,39 @@ impl State {
         }
     }*/
 
-/*    fn spawn_player(&mut self, token: NetToken, name: String, pos: Point, color: Color) {
+    fn spawn_player(&mut self, token: NetToken, name: String, pos: Point<f32>, color: Color) {
         let idx = self.objects.len();
-        self.objects.push(GameObject::new(pos.x, pos.y, color.clone()));
+        self.objects.push(GameObject::new(pos.x().clone(), pos.y().clone(), color));
 
-        self.players.insert(token.clone(), Player {
-            name: name.clone(),
+        self.players.insert(token, Player {
+            name: name,
             obj_index: idx
         });
     }
+    /*
+        fn update_player_pos(&mut self, token: NetToken, new_pos: Point) {
+            match self.players.get_mut(&token) {
+                Some(&mut Player { obj_index: ref idx, .. }) => self.objects.get_mut(idx.clone()),
+                None => None
+            }.and_then(|obj| {
+                obj.pos = new_pos;
 
-    fn update_player_pos(&mut self, token: NetToken, new_pos: Point) {
-        match self.players.get_mut(&token) {
-            Some(&mut Player { obj_index: ref idx, .. }) => self.objects.get_mut(idx.clone()),
-            None => None
-        }.and_then(|obj| {
-            obj.pos = new_pos;
-
-            Some(())
-        });
-    }
+                Some(())
+            });
+        }*/
 
     fn player(&mut self) -> Option<&mut GameObject> {
-        let token = match self.connection {
-            Some(Connection { ref token, .. }) => token.clone(),
-            None => 0 as NetToken
-        };
+//        let token = match self.connection {
+//            Some(Connection { ref token, .. }) => token.clone(),
+//            None => 0 as NetToken
+//        };
+        let token = 0 as NetToken;
 
         match self.players.get_mut(&token) {
             Some(&mut Player { obj_index: ref idx, .. }) => self.objects.get_mut(idx.clone()),
             None => None
         }
-    }*/
+    }
 
     pub fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d) -> GameResult<()> {
         clear(BLACK, graphics);
@@ -228,7 +230,7 @@ impl State {
             let screen_pos = self.viewport.convert_world_pos(obj.pos.clone());
             let pos = ctx.transform.trans(screen_pos.x().clone() as f64, screen_pos.y().clone() as f64);
             let square = rectangle::square(0., 0., 20.);
-            rectangle(WHITE, square, pos, graphics);
+            rectangle(obj.color.clone(), square, pos, graphics);
         }
 
         //Side-scroll area
@@ -250,54 +252,58 @@ impl State {
         Ok(())
     }
 
-    /*    pub fn key_down_event(&mut self, _keycode: Keycode, _: Mod, _repeat: bool) {
+    pub fn key_press(&mut self, button: Button) {
+        if let Button::Keyboard(key) = button {
             match self.player() {
                 Some(ref mut player) => {
-                    match _keycode {
-                        Keycode::Up => player.move_to(Direction::Up, 10.0),
-                        Keycode::Down => player.move_to(Direction::Down, 10.0),
-                        Keycode::Left => player.move_to(Direction::Left, 10.0),
-                        Keycode::Right => player.move_to(Direction::Right, 10.0),
+                    match key {
+                        Key::Up => player.move_to(Direction::Up, 10.0),
+                        Key::Down => player.move_to(Direction::Down, 10.0),
+                        Key::Left => player.move_to(Direction::Left, 10.0),
+                        Key::Right => player.move_to(Direction::Right, 10.0),
                         _ => None
                     }
                 },
                 None => None
             }.and_then(|new_pos| {
-                if let Some(ref mut connection) = self.connection {
-                    connection.send_update_pos_event(new_pos).unwrap();
-                }
+                //            if let Some(ref mut connection) = self.connection {
+                //                connection.send_update_pos_event(new_pos).unwrap();
+                //            }
 
                 Some(())
             }).or_else(|| {
-                match _keycode {
-                    Keycode::Space => {
-                        let token = match self.connection {
-                            Some(Connection { ref token, .. }) => token.clone(),
-                            None => 0 as NetToken
-                        };
+                match key {
+                    Key::Space => {
+                        //                    let token = match self.connection {
+                        //                        Some(Connection { ref token, .. }) => token.clone(),
+                        //                        None => 0 as NetToken
+                        //                    };
+                        /*
 
-                        //                    let name = "Fratyz".to_string();
-                        //                    let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
-                        //                    let color = Color::from((255, 0, 255));
+                                                let name = "Fratyz".to_string();
+                                                let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
+                                                let color = Color::from((255, 0, 255));
 
-                        //                    let name = "Reef".to_string();
-                        //                    let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
-                        //                    let color = Color::from((0, 255, 0));
+                                                let name = "Reef".to_string();
+                                                let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
+                                                let color = Color::from((0, 255, 0));
+                        */
 
+                        let token = 0 as NetToken;
                         let name = "Fridge".to_string();
-                        let start_pos = Point::new(self.viewport.w as f32 / 2.0, self.viewport.h as f32 / 2.0);
-                        let color = Color::from((255, 0, 0));
+                        let start_pos = Point::<f32>::new(400., 300.);
 
-                        self.spawn_player(token, name.clone(), start_pos.clone(), color.clone());
+                        self.spawn_player(token, name, start_pos, RED);
 
-                        if let Some(ref mut connection) = self.connection {
-                            connection.send_spawn_event(name, start_pos, color).unwrap();
-                        }
+                        //                    if let Some(ref mut connection) = self.connection {
+                        //                        connection.send_spawn_event(name, start_pos, color).unwrap();
+                        //                    }
                     },
                     _ => ()
                 };
 
                 None
             });
-        }*/
+        }
+    }
 }
