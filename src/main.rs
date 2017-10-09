@@ -16,10 +16,7 @@ pub fn main() {
         .unwrap();
 
     let mut scene_idx = 0 as usize;
-    let mut scenes: Vec<Box<Scene>> = vec![
-        Box::new(play::Play::new(Some("127.0.0.1:7001".to_string()))),
-        Box::new(menu::Menu::new())
-    ];
+    let mut scene: Box<Scene> = Box::new(play::Play::new(Some("127.0.0.1:7001".to_string())));
 
     while let Some(e) = window.next() {
         match e {
@@ -28,11 +25,7 @@ pub fn main() {
                     ButtonState::Press => {
                         match button {
                             Button::Keyboard(Key::Return) => {
-                                scene_idx = match scene_idx {
-                                    0 => 1,
-                                    1 => 0,
-                                    _ => 0
-                                };
+                                scene = Box::new(menu::Menu::new());
                             }
                             _ => ()
                         }
@@ -41,17 +34,17 @@ pub fn main() {
                 }
 
                 match button_state {
-                    ButtonState::Press => scenes[scene_idx].key_press(button),
+                    ButtonState::Press => scene.key_press(button),
                     _ => ()
                 }
             }
             Event::Loop(Loop::Render(args)) => {
                 window.draw_2d(&e, |mut ctx, mut graph| {
-                    scenes[scene_idx].draw(&mut ctx, &mut graph).unwrap();
+                    scene.draw(&mut ctx, &mut graph).unwrap();
                 });
             }
             Event::Loop(Loop::Update(UpdateArgs { dt })) => {
-                scenes[scene_idx].update(dt).unwrap();
+                scene.update(dt).unwrap();
             }
             _ => ()
         };
