@@ -53,6 +53,7 @@ impl Movable for Point<f32> {
             Direction::Down => self.vec[1] += units,
             Direction::Left => self.vec[0] -= units,
             Direction::Right => self.vec[0] += units,
+            Direction::Stay => ()
         };
     }
 }
@@ -62,7 +63,20 @@ enum Direction {
     Up,
     Down,
     Left,
-    Right
+    Right,
+    Stay
+}
+
+impl From<Key> for Direction {
+    fn from(key: Key) -> Self {
+        match key {
+            Key::Up => Direction::Up,
+            Key::Down => Direction::Down,
+            Key::Right => Direction::Right,
+            Key::Left => Direction::Left,
+            _ => Direction::Stay
+        }
+    }
 }
 
 struct Rect<T: Clone> {
@@ -171,44 +185,10 @@ impl State {
     }
 
     pub fn update(&mut self, dt: f64) -> GameResult<()> {
-        match self.player() {
-            Some(&mut GameObject { pos: ref player_pos, .. }) => Some(player_pos.clone()),
-            None => None
-        }.and_then(|world| {
-            let units = 10.;
-            let local = self.viewport.convert_world_pos(world.clone());
-            let x = local.x().clone();
-            let y = local.y().clone();
-
-            let free_area = &self.free_area;
-
-            let intersect = (y < free_area.top_left.y().clone()) as u8 |
-                (((y > free_area.bottom_right.y().clone() - 20.) as u8) << 1) |
-                (((x < free_area.top_left.x().clone()) as u8) << 2) |
-                (((x > free_area.bottom_right.x() - 20.) as u8) << 3);
-
-            if (intersect >> Direction::Up as u8) & 1 == 1 {
-                Some((Direction::Up, units))
-            } else if (intersect >> Direction::Down as u8) & 1 == 1 {
-                Some((Direction::Down, units))
-            } else if (intersect >> Direction::Left as u8) & 1 == 1 {
-                Some((Direction::Left, units))
-            } else if (intersect >> Direction::Right as u8) & 1 == 1 {
-                Some((Direction::Right, units))
-            } else {
-                None
-            }
-        }).and_then(|(direction, units)| {
-            self.viewport.move_to(direction, units);
-
-            Some(())
-        });
-
-        if let Some(ref mut connection) = self.connection {
-            connection.listen_events()
-        } else {
-            None
-        }
+        self.connection.as_mut()
+            .and_then(|ref mut connection| {
+                connection.listen_events()
+            })
             .and_then(|(event_type, data)| {
                 match event_type {
                     EventType::Spawn => {
@@ -317,53 +297,68 @@ impl State {
     pub fn key_press(&mut self, button: Button) {
         //TODO: Fix handling space key only if player not spawned
         if let Button::Keyboard(key) = button {
-            match self.player() {
-                Some(ref mut player) => {
+            let direction = Direction::from(key);
+            let step = 10f32;
+
+            self.player()
+                .and_then(|ref mut player| {
+                    player.move_to(direction.clone(), step)
+                })
+                .and_then(|new_pos| {
+                    if let Some(ref mut connection) = self.connection {
+                        connection.send_update_pos_event(new_pos.clone()).unwrap();
+                    }
+
+                    let local = self.viewport.convert_world_pos(new_pos);
+                    let x = local.x().clone();
+                    let y = local.y().clone();
+
+                    let free_area = &self.free_area;
+
+                    let intersect = (y < free_area.top_left.y().clone()) as u8 |
+                        (((y > free_area.bottom_right.y().clone() - 20.) as u8) << 1) |
+                        (((x < free_area.top_left.x().clone()) as u8) << 2) |
+                        (((x > free_area.bottom_right.x() - 20.) as u8) << 3);
+
+                    if (intersect >> direction.clone() as u8) & 1 == 1 {
+                        self.viewport.move_to(direction, step);
+
+                        Some(())
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
                     match key {
-                        Key::Up => player.move_to(Direction::Up, 10.0),
-                        Key::Down => player.move_to(Direction::Down, 10.0),
-                        Key::Left => player.move_to(Direction::Left, 10.0),
-                        Key::Right => player.move_to(Direction::Right, 10.0),
-                        _ => None
-                    }
-                }
-                None => None
-            }.and_then(|new_pos| {
-                if let Some(ref mut connection) = self.connection {
-                    connection.send_update_pos_event(new_pos).unwrap();
-                }
+                        Key::Space => {
+                            let token = match self.connection {
+                                Some(Connection { ref token, .. }) => token.clone(),
+                                None => 0 as NetToken
+                            };
 
-                Some(())
-            }).or_else(|| {
-                match key {
-                    Key::Space => {
-                        let token = match self.connection {
-                            Some(Connection { ref token, .. }) => token.clone(),
-                            None => 0 as NetToken
-                        };
+                            let start_pos = Point::<f32>::new(400., 300.);
 
-                        let start_pos = Point::<f32>::new(400., 300.);
+                            /*
+                            let name = "Fratyz".to_string();
+                            let color = BLUE;
 
-//                        let name = "Fratyz".to_string();
-//                        let color = BLUE;
+                            let name = "Reef".to_string();
+                            let color = GREEN;
+                            */
 
-//                        let name = "Reef".to_string();
-//                        let color = GREEN;
+                            let name = "Fridge".to_string();
+                            let color = RED;
 
-                        let name = "Fridge".to_string();
-                        let color = RED;
+                            self.spawn_player(token, name.clone(), start_pos.clone(), color);
 
-                        self.spawn_player(token, name.clone(), start_pos.clone(), color);
+                            self.connection.as_mut()
+                                .and_then(|ref mut connection| Some(connection.send_spawn_event(name, start_pos, color)));
+                        },
+                        _ => ()
+                    };
 
-                        if let Some(ref mut connection) = self.connection {
-                            connection.send_spawn_event(name, start_pos, color).unwrap();
-                        }
-                    }
-                    _ => ()
-                };
-
-                None
-            });
+                    None
+                });
         }
     }
 }
