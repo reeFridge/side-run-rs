@@ -2,104 +2,13 @@ use std::net::TcpStream;
 use std::io::{Read};
 use std::collections::HashMap;
 use connection::{Connection, NetToken, EventType};
-type GameResult<T> = Result<T, String>;
-
-
 use piston_window::types::Color;
 use piston_window::*;
-
-pub struct Point<T> {
-    vec: [T; 2]
-}
-
-impl<T: Clone> Point<T> {
-    pub fn new(x: T, y: T) -> Self {
-        Point { vec: [x, y] }
-    }
-
-    pub fn x(&self) -> &T {
-        &self.vec[0]
-    }
-
-    pub fn y(&self) -> &T {
-        &self.vec[1]
-    }
-
-    pub fn set(&mut self, point: Point<T>) {
-        self.vec = point.vec;
-    }
-
-    pub fn set_x(&mut self, x: T) {
-        self.vec[0] = x;
-    }
-
-    pub fn set_y(&mut self, y: T) {
-        self.vec[1] = y;
-    }
-
-    pub fn clone(&self) -> Point<T> {
-        Point { vec: [self.x().clone(), self.y().clone()] }
-    }
-}
-
-trait Movable {
-    fn translate_by_direction(&mut self, direction: Direction, units: f32);
-}
-
-impl Movable for Point<f32> {
-    fn translate_by_direction(&mut self, direction: Direction, units: f32) {
-        match direction {
-            Direction::Up => self.vec[1] -= units,
-            Direction::Down => self.vec[1] += units,
-            Direction::Left => self.vec[0] -= units,
-            Direction::Right => self.vec[0] += units,
-            Direction::Stay => ()
-        };
-    }
-}
-
-#[derive(Clone)]
-enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-    Stay
-}
-
-impl From<Key> for Direction {
-    fn from(key: Key) -> Self {
-        match key {
-            Key::Up => Direction::Up,
-            Key::Down => Direction::Down,
-            Key::Right => Direction::Right,
-            Key::Left => Direction::Left,
-            _ => Direction::Stay
-        }
-    }
-}
-
-struct Rect<T: Clone> {
-    top_left: Point<T>,
-    bottom_right: Point<T>
-}
-
-impl<T: Clone> Rect<T> {
-    fn new(x: T, y: T, w: T, h: T) -> Self {
-        Rect {
-            top_left: Point::<T>::new(x, y),
-            bottom_right: Point::<T>::new(w, h)
-        }
-    }
-}
+use scenes::common::*;
+use scenes::scene;
 
 const W_HEIGHT: f32 = 1000.0;
 const W_WIDTH: f32 = 1000.0;
-const RED: [f32; 4] = [1., 0., 0., 1.];
-const GREEN: [f32; 4] = [0., 1., 0., 1.];
-const BLUE: [f32; 4] = [0., 0., 1., 1.];
-const WHITE: [f32; 4] = [1., 1., 1., 1.];
-const BLACK: [f32; 4] = [0., 0., 0., 1.];
 
 struct ViewPort {
     pos: Point<f32>
@@ -157,7 +66,7 @@ struct Player {
 
 // if connection is not established player will be at   players[0]
 // else controllable player will be at                  players[connection.token]
-pub struct State {
+pub struct Play {
     free_area: Rect<f32>,
     viewport: ViewPort,
     objects: Vec<GameObject>,
@@ -165,15 +74,15 @@ pub struct State {
     connection: Option<Connection>
 }
 
-impl State {
-    pub fn new() -> GameResult<State> {
+impl Play {
+    pub fn new() -> Play {
         let objects = vec![
             GameObject::new(200.0, 300.0, WHITE),
             GameObject::new(500.0, 100.0, WHITE),
             GameObject::new(50.0, 40.0, WHITE)
         ];
 
-        let s = State {
+        let s = Play {
             objects: objects,
             viewport: ViewPort::new(0.0, 0.0),
             players: HashMap::new(),
@@ -181,30 +90,7 @@ impl State {
             connection: None
         };
 
-        Ok(s)
-    }
-
-    pub fn update(&mut self, dt: f64) -> GameResult<()> {
-        self.connection.as_mut()
-            .and_then(|ref mut connection| {
-                connection.listen_events()
-            })
-            .and_then(|(event_type, data)| {
-                match event_type {
-                    EventType::Spawn => {
-                        let (token, name, pos, color) = Connection::parse_spawn_event(data).unwrap();
-                        self.spawn_player(token, name, pos, color);
-                    },
-                    EventType::UpdatePos => {
-                        let (token, pos) = Connection::parse_update_pos_event(data).unwrap();
-                        self.update_player_pos(token, pos);
-                    }
-                };
-
-                Some(())
-            });
-
-        Ok(())
+        s
     }
 
     pub fn connect(&mut self, host: String) -> Result<(), String> {
@@ -254,8 +140,33 @@ impl State {
             None => None
         }
     }
+}
 
-    pub fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d) -> GameResult<()> {
+impl scene::Scene for Play {
+    fn update(&mut self, dt: f64) -> GameResult<()> {
+        self.connection.as_mut()
+            .and_then(|ref mut connection| {
+                connection.listen_events()
+            })
+            .and_then(|(event_type, data)| {
+                match event_type {
+                    EventType::Spawn => {
+                        let (token, name, pos, color) = Connection::parse_spawn_event(data).unwrap();
+                        self.spawn_player(token, name, pos, color);
+                    },
+                    EventType::UpdatePos => {
+                        let (token, pos) = Connection::parse_update_pos_event(data).unwrap();
+                        self.update_player_pos(token, pos);
+                    }
+                };
+
+                Some(())
+            });
+
+        Ok(())
+    }
+
+    fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d) -> GameResult<()> {
         clear(BLACK, graphics);
 
         for obj in self.objects.iter() {
@@ -294,7 +205,7 @@ impl State {
         Ok(())
     }
 
-    pub fn key_press(&mut self, button: Button) {
+    fn key_press(&mut self, button: Button) {
         //TODO: Fix handling space key only if player not spawned
         if let Button::Keyboard(key) = button {
             let direction = Direction::from(key);
