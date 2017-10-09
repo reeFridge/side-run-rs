@@ -31,21 +31,21 @@ pub fn main() {
                         }
                     }
                     _ => ()
-                }
+                };
 
                 match button_state {
                     ButtonState::Press => scene.key_press(button),
                     _ => ()
                 }
-            }
+            },
             Event::Loop(Loop::Render(args)) => {
                 window.draw_2d(&e, |mut ctx, mut graph| {
                     scene.draw(&mut ctx, &mut graph).unwrap();
                 });
-            }
+            },
             Event::Loop(Loop::Update(UpdateArgs { dt })) => {
                 scene.update(dt).unwrap();
-            }
+            },
             _ => ()
         };
     }
