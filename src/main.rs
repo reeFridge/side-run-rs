@@ -21,10 +21,6 @@ pub fn main() {
     };
 
     while let Some(e) = window.next() {
-        e.update(|&UpdateArgs { dt }| {
-            state.update(dt).unwrap();
-        });
-
         match e {
             Event::Input(Input::Button(ButtonArgs { state: button_state, button, .. })) => {
                 match button_state {
@@ -32,11 +28,15 @@ pub fn main() {
                     _ => ()
                 }
             },
+            Event::Loop(Loop::Render(args)) => {
+                window.draw_2d(&e, |mut ctx, mut graph| {
+                    state.draw(&mut ctx,&mut graph).unwrap();
+                });
+            },
+            Event::Loop(Loop::Update(UpdateArgs { dt })) => {
+                state.update(dt).unwrap();
+            },
             _ => ()
         };
-
-        window.draw_2d(&e, |mut ctx, mut graph| {
-            state.draw(&mut ctx,&mut graph).unwrap();
-        });
     }
 }
