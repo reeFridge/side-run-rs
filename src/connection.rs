@@ -1,7 +1,7 @@
 use std::net::TcpStream;
 use byteorder::{ByteOrder, BigEndian};
 use std::time::Duration;
-use scenes::play::Point;
+use scenes::common::*;
 use std::io::{Read, Write};
 use piston_window::types::Color;
 
