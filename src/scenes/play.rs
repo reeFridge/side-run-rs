@@ -75,14 +75,14 @@ pub struct Play {
 }
 
 impl Play {
-    pub fn new() -> Play {
+    pub fn new(auto_connect: Option<String>) -> Play {
         let objects = vec![
             GameObject::new(200.0, 300.0, WHITE),
             GameObject::new(500.0, 100.0, WHITE),
             GameObject::new(50.0, 40.0, WHITE)
         ];
 
-        let s = Play {
+        let mut play = Play {
             objects: objects,
             viewport: ViewPort::new(0.0, 0.0),
             players: HashMap::new(),
@@ -90,7 +90,14 @@ impl Play {
             connection: None
         };
 
-        s
+        if let Some(addr) = auto_connect {
+            match play.connect(addr) {
+                Err(err) => println!("Failed to connect: {}", err),
+                _ => ()
+            }
+        }
+
+        play
     }
 
     pub fn connect(&mut self, host: String) -> Result<(), String> {
