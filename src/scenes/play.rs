@@ -1,11 +1,11 @@
 use std::net::TcpStream;
-use std::io::{Read};
 use std::collections::HashMap;
 use connection::{Connection, NetToken, EventType};
 use piston_window::types::Color;
 use piston_window::*;
 use scenes::common::*;
-use scenes::scene;
+use scenes::scene::{Scene, SceneInstance};
+use scenes::menu::Menu;
 
 const W_HEIGHT: f32 = 1000.0;
 const W_WIDTH: f32 = 1000.0;
@@ -71,7 +71,8 @@ pub struct Play {
     viewport: ViewPort,
     objects: Vec<GameObject>,
     players: HashMap<NetToken, Player>,
-    connection: Option<Connection>
+    connection: Option<Connection>,
+    next_scene: Option<SceneInstance>
 }
 
 impl Play {
@@ -87,7 +88,8 @@ impl Play {
             viewport: ViewPort::new(0.0, 0.0),
             players: HashMap::new(),
             free_area: Rect::<f32>::new(200., 150., 600., 450.),
-            connection: None
+            connection: None,
+            next_scene: None
         };
 
         if let Some(addr) = auto_connect {
@@ -149,7 +151,11 @@ impl Play {
     }
 }
 
-impl scene::Scene for Play {
+impl Scene for Play {
+    fn get_next(&mut self) -> Option<SceneInstance> {
+        self.next_scene.take()
+    }
+
     fn update(&mut self, dt: f64) -> GameResult<()> {
         self.connection.as_mut()
             .and_then(|ref mut connection| {
@@ -272,6 +278,9 @@ impl scene::Scene for Play {
                             self.connection.as_mut()
                                 .and_then(|ref mut connection| Some(connection.send_spawn_event(name, start_pos, color)));
                         },
+                        Key::Return => {
+                            self.next_scene = Some(Box::new(Menu::new()));
+                        }
                         _ => ()
                     };
 
