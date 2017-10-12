@@ -34,7 +34,7 @@ impl Scene for Menu {
         if let Button::Keyboard(key) = button {
             match key {
                 Key::Return => {
-                    self.switcher.next_scene = Some(Box::new(Play::new(None)));
+                    self.switcher.set_next(Some(Box::new(Play::new(None))));
                 },
                 _ => ()
             }

@@ -15,12 +15,16 @@ pub trait Switcher {
 }
 
 pub struct BaseSwitcher {
-    pub next_scene: Option<SceneInstance>
+    next_scene: Option<SceneInstance>
 }
 
 impl BaseSwitcher {
-    pub fn new(next_scene: Option<SceneInstance>) -> BaseSwitcher {
-        BaseSwitcher { next_scene: next_scene }
+    pub fn new(scene: Option<SceneInstance>) -> BaseSwitcher {
+        BaseSwitcher { next_scene: scene }
+    }
+
+    pub fn set_next(&mut self, scene: Option<SceneInstance>) {
+        self.next_scene = scene;
     }
 }
 

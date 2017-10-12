@@ -279,7 +279,7 @@ impl Scene for Play {
                                 .and_then(|ref mut connection| Some(connection.send_spawn_event(name, start_pos, color)));
                         },
                         Key::Return => {
-                            self.switcher.next_scene = Some(Box::new(Menu::new()));
+                            self.switcher.set_next(Some(Box::new(Menu::new())));
                         }
                         _ => ()
                     };
