@@ -1,23 +1,23 @@
 use scenes::common::*;
 use piston_window::*;
-use scenes::scene::{Scene, SceneInstance};
+use scenes::scene::{Scene, SceneInstance, BaseSwitcher, Switcher};
 use scenes::play::Play;
 
 pub struct Menu {
-    next_scene: Option<SceneInstance>
+    switcher: BaseSwitcher
 }
 
 impl Menu {
     pub fn new() -> Menu {
         Menu {
-            next_scene: None
+            switcher: BaseSwitcher::new(None)
         }
     }
 }
 
 impl Scene for Menu {
-    fn get_next(&mut self) -> Option<SceneInstance> {
-        self.next_scene.take()
+    fn switcher(&mut self) -> &mut Switcher {
+        &mut self.switcher
     }
 
     fn update(&mut self, dt: f64) -> GameResult<()> {
@@ -34,7 +34,7 @@ impl Scene for Menu {
         if let Button::Keyboard(key) = button {
             match key {
                 Key::Return => {
-                    self.next_scene = Some(Box::new(Play::new(None)));
+                    self.switcher.next_scene = Some(Box::new(Play::new(None)));
                 },
                 _ => ()
             }

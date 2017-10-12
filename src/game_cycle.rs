@@ -32,7 +32,7 @@ impl GameCycle {
                     self.scene.update(dt).unwrap();
                 });
 
-                self.scene
+                self.scene.switcher()
                     .get_next()
                     .and_then(|next_scene| Some(self.set_scene(next_scene)));
             } else {

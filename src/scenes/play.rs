@@ -4,7 +4,7 @@ use connection::{Connection, NetToken, EventType};
 use piston_window::types::Color;
 use piston_window::*;
 use scenes::common::*;
-use scenes::scene::{Scene, SceneInstance};
+use scenes::scene::{Scene, SceneInstance, BaseSwitcher, Switcher};
 use scenes::menu::Menu;
 
 const W_HEIGHT: f32 = 1000.0;
@@ -67,12 +67,12 @@ struct Player {
 // if connection is not established player will be at   players[0]
 // else controllable player will be at                  players[connection.token]
 pub struct Play {
+    switcher: BaseSwitcher,
     free_area: Rect<f32>,
     viewport: ViewPort,
     objects: Vec<GameObject>,
     players: HashMap<NetToken, Player>,
-    connection: Option<Connection>,
-    next_scene: Option<SceneInstance>
+    connection: Option<Connection>
 }
 
 impl Play {
@@ -84,12 +84,12 @@ impl Play {
         ];
 
         let mut play = Play {
+            switcher: BaseSwitcher::new(None),
             objects: objects,
             viewport: ViewPort::new(0.0, 0.0),
             players: HashMap::new(),
             free_area: Rect::<f32>::new(200., 150., 600., 450.),
-            connection: None,
-            next_scene: None
+            connection: None
         };
 
         if let Some(addr) = auto_connect {
@@ -152,8 +152,8 @@ impl Play {
 }
 
 impl Scene for Play {
-    fn get_next(&mut self) -> Option<SceneInstance> {
-        self.next_scene.take()
+    fn switcher(&mut self) -> &mut Switcher {
+        &mut self.switcher
     }
 
     fn update(&mut self, dt: f64) -> GameResult<()> {
@@ -279,7 +279,7 @@ impl Scene for Play {
                                 .and_then(|ref mut connection| Some(connection.send_spawn_event(name, start_pos, color)));
                         },
                         Key::Return => {
-                            self.next_scene = Some(Box::new(Menu::new()));
+                            self.switcher.next_scene = Some(Box::new(Menu::new()));
                         }
                         _ => ()
                     };
