@@ -1,5 +1,8 @@
 extern crate piston_window;
 extern crate byteorder;
+extern crate find_folder;
+
+#[macro_use]
 extern crate conrod;
 
 mod scenes;
@@ -7,7 +10,7 @@ mod connection;
 mod game_cycle;
 
 use piston_window::*;
-use scenes::play::Play;
+use scenes::menu::Menu;
 use game_cycle::GameCycle;
 
 pub fn main() {
@@ -17,7 +20,18 @@ pub fn main() {
         .build()
         .unwrap();
 
-    let scene = Box::new(Play::new(Some("127.0.0.1:7001".to_string())));
+    let texture = {
+        const WIDTH: u32 = 800;
+        const HEIGHT: u32 = 600;
+        let buffer_len = WIDTH as usize * HEIGHT as usize;
+        let init = vec![128; buffer_len];
+        let settings = TextureSettings::new();
+        let factory = &mut window.factory;
+
+        G2dTexture::from_memory_alpha(factory, &init, WIDTH, HEIGHT, &settings).unwrap()
+    };
+
+    let scene = Box::new(Menu::new(texture));
     let mut cycle = GameCycle::new(scene);
 
     cycle.run(&mut window);
