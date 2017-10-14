@@ -6,3 +6,4 @@ authors = ["reeFridge <reefridgerator@gmail.com>"]
 [dependencies]
 byteorder = "1"
 piston_window = "0.71"
+conrod = { version = "0.55", features = ["piston"] }
