@@ -1,6 +1,6 @@
 use scenes::common::*;
 use scenes::scene::{Scene, SceneInstance, BaseSwitcher, Switcher};
-use scenes::play::Play;
+use scenes::play::{Play, PlayerConfig};
 use find_folder;
 use conrod::{self, widget, Colorable, Positionable, Widget, Labelable, Sizeable, color};
 use piston_window::*;
@@ -137,7 +137,15 @@ impl Scene for Menu {
             .down_from(self.ids.input_host, 10.0)
             .set(self.ids.button, ui)
             {
-                self.switcher.set_next(Some(Box::new(Play::new(Some(self.input_host_text.clone())))));
+                let player_config = PlayerConfig {
+                    name: self.input_name_text.clone(),
+                    color: self.color.to_fsa()
+                };
+
+                self.switcher.set_next(Some(Box::new(Play::new(
+                    Some(self.input_host_text.clone()),
+                    player_config
+                ))));
             }
 
         Ok(())
@@ -181,16 +189,5 @@ impl Scene for Menu {
         }
 
         Ok(())
-    }
-
-    fn key_press(&mut self, button: Button) {
-        if let Button::Keyboard(key) = button {
-            match key {
-                Key::Return => {
-                    self.switcher.set_next(Some(Box::new(Play::new(None))));
-                },
-                _ => ()
-            }
-        }
     }
 }
