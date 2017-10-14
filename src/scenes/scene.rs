@@ -4,8 +4,8 @@ use scenes::common::*;
 pub type SceneInstance = Box<Scene>;
 
 pub trait Scene {
-    fn handle_event(&mut self, event: Event) {()}
-    fn update(&mut self, dt: f64) -> GameResult<()> {Ok(())}
+    fn handle_event(&mut self, _event: Event) {()}
+    fn update(&mut self, _dt: f64) -> GameResult<()> {Ok(())}
     fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d) -> GameResult<()>;
     fn key_press(&mut self, button: Button);
     fn switcher(&mut self) -> &mut Switcher;
