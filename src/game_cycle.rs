@@ -15,6 +15,8 @@ impl GameCycle {
             let may_event = window.next();
 
             if let Some(event) = may_event {
+                self.scene.handle_event(event.clone());
+
                 event.button(|ButtonArgs { state: button_state, button, .. }| {
                     match button_state {
                         ButtonState::Press => self.scene.key_press(button),
