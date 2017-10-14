@@ -2,10 +2,20 @@ use scenes::common::*;
 use scenes::scene::{Scene, SceneInstance, BaseSwitcher, Switcher};
 use scenes::play::Play;
 use find_folder;
-use conrod::{self, widget, Colorable, Positionable, Widget, Labelable, Sizeable};
+use conrod::{self, widget, Colorable, Positionable, Widget, Labelable, Sizeable, color};
 use piston_window::*;
 
-widget_ids!(struct Ids { text, button, input, canvas });
+widget_ids!(struct Ids {
+    text,
+    button,
+    input_host,
+    input_name,
+    canvas,
+    slider_r,
+    slider_g,
+    slider_b,
+    color_box
+});
 
 pub struct Menu {
     switcher: BaseSwitcher,
@@ -14,7 +24,9 @@ pub struct Menu {
     image_map: conrod::image::Map<G2dTexture>,
     glyph_cache: conrod::text::GlyphCache,
     text_texture_cache: G2dTexture,
-    input_text: String
+    input_host_text: String,
+    input_name_text: String,
+    color: color::Color
 }
 
 impl Menu {
@@ -37,7 +49,9 @@ impl Menu {
             image_map: conrod::image::Map::<G2dTexture>::new(),
             glyph_cache: conrod::text::GlyphCache::new(WIDTH, HEIGHT, SCALE_TOLERANCE, POSITION_TOLERANCE),
             text_texture_cache: text_texture_cache,
-            input_text: String::from("127.0.0.1:7001")
+            input_host_text: String::from("127.0.0.1:7001"),
+            input_name_text: String::from("Fridge"),
+            color: color::Color::from(color::Rgba(1., 0., 0., 1.))
         }
     }
 }
@@ -59,6 +73,39 @@ impl Scene for Menu {
             .color(conrod::color::DARK_CHARCOAL)
             .set(self.ids.canvas, ui);
 
+        widget::BorderedRectangle::new([100., 100.])
+            .mid_top()
+            .y_place(conrod::position::Place::End(Some(20.)))
+            .with_style(conrod::widget::bordered_rectangle::Style {
+                color: Some(self.color),
+                border: Some(3.),
+                border_color: Some(conrod::color::BLACK)
+            })
+            .set(self.ids.color_box, ui);
+
+        {
+            for val in widget::Slider::new(self.color.red(), 0., 1.)
+                .left_from(self.ids.color_box, 10.)
+                .set(self.ids.slider_r, ui)
+                {
+                    self.color.set_red(val);
+                }
+
+            for val in widget::Slider::new(self.color.green(), 0., 1.)
+                .down_from(self.ids.color_box, 10.)
+                .set(self.ids.slider_g, ui)
+                {
+                    self.color.set_green(val);
+                }
+
+            for val in widget::Slider::new(self.color.blue(), 0., 1.)
+                .right_from(self.ids.color_box, 10.)
+                .set(self.ids.slider_b, ui)
+                {
+                    self.color.set_blue(val);
+                }
+        }
+
         widget::Text::new("SIDE_RUN")
             .center_justify()
             .middle_of(ui.window)
@@ -66,20 +113,31 @@ impl Scene for Menu {
             .font_size(32)
             .set(self.ids.text, ui);
 
-        for edit in widget::TextEdit::new(&self.input_text)
-            .down_from(self.ids.text, 60.0)
-            .set(self.ids.input, ui)
+        for edit in widget::TextEdit::new(&self.input_name_text)
+            .center_justify()
+            .down_from(self.ids.text, 20.)
+            .set(self.ids.input_name, ui)
             {
-                self.input_text = edit;
+                self.input_name_text = edit;
+            }
+
+        for edit in widget::TextEdit::new(&self.input_host_text)
+            .center_justify()
+            .w(255.)
+            .mid_bottom()
+            .y_place(conrod::position::Place::Start(Some(100.)))
+            .set(self.ids.input_host, ui)
+            {
+                self.input_host_text = edit;
             }
 
         for _press in widget::Button::new()
             .align_middle_x()
-            .label("play")
-            .down_from(self.ids.input, 10.0)
+            .label("start")
+            .down_from(self.ids.input_host, 10.0)
             .set(self.ids.button, ui)
             {
-                self.switcher.set_next(Some(Box::new(Play::new(Some(self.input_text.clone())))));
+                self.switcher.set_next(Some(Box::new(Play::new(Some(self.input_host_text.clone())))));
             }
 
         Ok(())
