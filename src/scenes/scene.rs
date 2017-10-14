@@ -7,7 +7,7 @@ pub trait Scene {
     fn handle_event(&mut self, _event: Event) {()}
     fn update(&mut self, _dt: f64) -> GameResult<()> {Ok(())}
     fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d) -> GameResult<()>;
-    fn key_press(&mut self, button: Button);
+    fn key_press(&mut self, _button: Button) {()}
     fn switcher(&mut self) -> &mut Switcher;
 }
 
