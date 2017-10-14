@@ -1,5 +1,6 @@
 extern crate piston_window;
 extern crate byteorder;
+extern crate conrod;
 
 mod scenes;
 mod connection;
