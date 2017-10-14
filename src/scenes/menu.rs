@@ -2,10 +2,10 @@ use scenes::common::*;
 use scenes::scene::{Scene, SceneInstance, BaseSwitcher, Switcher};
 use scenes::play::Play;
 use find_folder;
-use conrod::{self, widget, Colorable, Positionable, Widget};
+use conrod::{self, widget, Colorable, Positionable, Widget, Labelable, Sizeable};
 use piston_window::*;
 
-widget_ids!(struct Ids { text });
+widget_ids!(struct Ids { text, button, input, canvas });
 
 pub struct Menu {
     switcher: BaseSwitcher,
@@ -13,7 +13,8 @@ pub struct Menu {
     ids: Ids,
     image_map: conrod::image::Map<G2dTexture>,
     glyph_cache: conrod::text::GlyphCache,
-    text_texture_cache: G2dTexture
+    text_texture_cache: G2dTexture,
+    input_text: String
 }
 
 impl Menu {
@@ -35,7 +36,8 @@ impl Menu {
             ui: ui,
             image_map: conrod::image::Map::<G2dTexture>::new(),
             glyph_cache: conrod::text::GlyphCache::new(WIDTH, HEIGHT, SCALE_TOLERANCE, POSITION_TOLERANCE),
-            text_texture_cache: text_texture_cache
+            text_texture_cache: text_texture_cache,
+            input_text: String::from("127.0.0.1:7001")
         }
     }
 }
@@ -53,13 +55,32 @@ impl Scene for Menu {
         // Set the widgets.
         let ui = &mut self.ui.set_widgets();
 
-        // "Hello World!" in the middle of the screen.
-        widget::Text::new("SIDE_RUN\nPress 'enter' to start")
+        widget::Canvas::new()
+            .color(conrod::color::DARK_CHARCOAL)
+            .set(self.ids.canvas, ui);
+
+        widget::Text::new("SIDE_RUN")
             .center_justify()
             .middle_of(ui.window)
             .color(conrod::color::WHITE)
             .font_size(32)
             .set(self.ids.text, ui);
+
+        for edit in widget::TextEdit::new(&self.input_text)
+            .down_from(self.ids.text, 60.0)
+            .set(self.ids.input, ui)
+            {
+                self.input_text = edit;
+            }
+
+        for _press in widget::Button::new()
+            .align_middle_x()
+            .label("play")
+            .down_from(self.ids.input, 10.0)
+            .set(self.ids.button, ui)
+            {
+                self.switcher.set_next(Some(Box::new(Play::new(Some(self.input_text.clone())))));
+            }
 
         Ok(())
     }
@@ -69,23 +90,19 @@ impl Scene for Menu {
     }
 
     fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d) -> GameResult<()> {
-        let mut text_vertex_data = Vec::new();
-
         // A function used for caching glyphs to the texture cache.
-        let cache_queued_glyphs = |graphics: &mut G2d,
-                                   cache: &mut G2dTexture,
-                                   rect: conrod::text::rt::Rect<u32>,
-                                   data: &[u8]|
-            {
-                let offset = [rect.min.x, rect.min.y];
-                let size = [rect.width(), rect.height()];
-                let format = texture::Format::Rgba8;
-                let encoder = &mut graphics.encoder;
-                text_vertex_data.clear();
-                text_vertex_data.extend(data.iter().flat_map(|&b| vec![255, 255, 255, b]));
-                texture::UpdateTexture::update(cache, encoder, format, &text_vertex_data[..], offset, size)
-                    .expect("failed to update texture")
-            };
+        fn cache_queued_glyphs(graphics: &mut G2d, cache: &mut G2dTexture, rect: conrod::text::rt::Rect<u32>, data: &[u8]) {
+            let mut text_vertex_data = Vec::new();
+            let offset = [rect.min.x, rect.min.y];
+            let size = [rect.width(), rect.height()];
+            let format = texture::Format::Rgba8;
+            let encoder = &mut graphics.encoder;
+            text_vertex_data.clear();
+            text_vertex_data.extend(data.iter().flat_map(|&b| vec![255, 255, 255, b]));
+
+            texture::UpdateTexture::update(cache, encoder, format, &text_vertex_data[..], offset, size)
+                .expect("failed to update texture")
+        }
 
         if let Some(primitives) = self.ui.draw_if_changed() {
             // Specify how to get the drawable texture from the image. In this case, the image
