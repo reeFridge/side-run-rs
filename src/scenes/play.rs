@@ -64,6 +64,12 @@ struct Player {
     obj_index: usize
 }
 
+#[derive(Clone)]
+pub struct PlayerConfig {
+    pub name: String,
+    pub color: Color
+}
+
 // if connection is not established player will be at   players[0]
 // else controllable player will be at                  players[connection.token]
 pub struct Play {
@@ -72,11 +78,12 @@ pub struct Play {
     viewport: ViewPort,
     objects: Vec<GameObject>,
     players: HashMap<NetToken, Player>,
-    connection: Option<Connection>
+    connection: Option<Connection>,
+    player_config: PlayerConfig
 }
 
 impl Play {
-    pub fn new(auto_connect: Option<String>) -> Play {
+    pub fn new(auto_connect: Option<String>, player_config: PlayerConfig) -> Play {
         let objects = vec![
             GameObject::new(200.0, 300.0, WHITE),
             GameObject::new(500.0, 100.0, WHITE),
@@ -89,7 +96,8 @@ impl Play {
             viewport: ViewPort::new(0.0, 0.0),
             players: HashMap::new(),
             free_area: Rect::<f32>::new(200., 150., 600., 450.),
-            connection: None
+            connection: None,
+            player_config: player_config
         };
 
         if let Some(addr) = auto_connect {
@@ -117,7 +125,7 @@ impl Play {
         }
     }
 
-    fn spawn_player(&mut self, token: NetToken, name: String, pos: Point<f32>, color: Color) {
+    fn spawn_player(&mut self, token: NetToken, pos: Point<f32>, name: String, color: Color) {
         let idx = self.objects.len();
         self.objects.push(GameObject::new(pos.x().clone(), pos.y().clone(), color));
 
@@ -125,6 +133,20 @@ impl Play {
             name: name,
             obj_index: idx
         });
+    }
+
+    fn spawn_self_player(&mut self, pos: Point<f32>) {
+        let token = match self.connection {
+            Some(Connection { ref token, .. }) => token.clone(),
+            None => 0 as NetToken
+        };
+
+        let PlayerConfig { name, color } = self.player_config.clone();
+
+        self.spawn_player(token, pos.clone(), name.clone(), color.clone());
+
+        self.connection.as_mut()
+            .and_then(|ref mut connection| Some(connection.send_spawn_event(name, pos, color)));
     }
 
     fn update_player_pos(&mut self, token: NetToken, new_pos: Point<f32>) {
@@ -165,7 +187,7 @@ impl Scene for Play {
                 match event_type {
                     EventType::Spawn => {
                         let (token, name, pos, color) = Connection::parse_spawn_event(data).unwrap();
-                        self.spawn_player(token, name, pos, color);
+                        self.spawn_player(token, pos, name, color);
                     },
                     EventType::UpdatePos => {
                         let (token, pos) = Connection::parse_update_pos_event(data).unwrap();
@@ -255,28 +277,8 @@ impl Scene for Play {
                 .or_else(|| {
                     match key {
                         Key::Space => {
-                            let token = match self.connection {
-                                Some(Connection { ref token, .. }) => token.clone(),
-                                None => 0 as NetToken
-                            };
-
-                            let start_pos = Point::<f32>::new(400., 300.);
-
-                            /*
-                            let name = "Fratyz".to_string();
-                            let color = BLUE;
-
-                            let name = "Reef".to_string();
-                            let color = GREEN;
-                            */
-
-                            let name = "Fridge".to_string();
-                            let color = RED;
-
-                            self.spawn_player(token, name.clone(), start_pos.clone(), color);
-
-                            self.connection.as_mut()
-                                .and_then(|ref mut connection| Some(connection.send_spawn_event(name, start_pos, color)));
+                            let spawn_pos = Point::<f32>::new(400., 300.);
+                            self.spawn_self_player(spawn_pos.clone());
                         },
                         _ => ()
                     };
