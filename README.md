@@ -6,7 +6,7 @@ Demo-like project where i'am trying to create something like *co-op-top-down-sid
 * Game cycle (main loop)
 * Simple scene switcher (just changing handler for game events)
   * Menu scene: setup player config (color, name) and host address:port
-  * Play scene: controll your colored Rect!
+  * Play scene: spawn (by `space` key) and controll your colored Rect!
 * Basic client-server messaging (like events)
   * `connect`, `spawn player`, `update player position` ... no more yet.
   
