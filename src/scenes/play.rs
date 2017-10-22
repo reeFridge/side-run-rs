@@ -30,12 +30,14 @@ impl ViewPort {
 
 struct GameObject {
     pos: Point<f32>,
-    color: Color
+    color: Color,
+    velocity: [f32; 2],
+    direction: [f32; 2]
 }
 
 impl GameObject {
     fn new(x: f32, y: f32, color: Color) -> GameObject {
-        GameObject { pos: Point::<f32>::new(x, y), color: color }
+        GameObject { pos: Point::<f32>::new(x, y), color: color, velocity: [0f32; 2], direction: [0., -1.] }
     }
 
     fn move_to(&mut self, direction: Direction, units: f32) -> Option<Point<f32>> {
@@ -43,14 +45,15 @@ impl GameObject {
         let y = self.pos.y().clone();
 
         let intersect = (y - units < 0.0) as u8 |
-            (((y + units > W_HEIGHT - 20.) as u8) << 1) |
+            (((y + units > W_HEIGHT) as u8) << 1) |
             (((x - units < 0.0) as u8) << 2) |
-            (((x + units > W_WIDTH - 20.) as u8) << 3);
+            (((x + units > W_WIDTH) as u8) << 3);
 
         let intersect = (intersect >> direction.clone() as u8) & 1 == 1;
 
         if !intersect {
-            self.pos.translate_by_direction(direction, units);
+            let dir: [f32; 2] = direction.into();
+            self.velocity = [dir[0] * units, dir[1] * units];
 
             Some(self.pos.clone())
         } else {
@@ -79,7 +82,8 @@ pub struct Play {
     objects: Vec<GameObject>,
     players: HashMap<NetToken, Player>,
     connection: Option<Connection>,
-    player_config: PlayerConfig
+    player_config: PlayerConfig,
+    cursor: [f64; 2]
 }
 
 impl Play {
@@ -97,7 +101,8 @@ impl Play {
             players: HashMap::new(),
             free_area: Rect::<f32>::new(200., 150., 600., 450.),
             connection: None,
-            player_config: player_config
+            player_config: player_config,
+            cursor: [0f64; 2]
         };
 
         if let Some(addr) = auto_connect {
@@ -179,6 +184,15 @@ impl Scene for Play {
     }
 
     fn update(&mut self, dt: f64) -> GameResult<()> {
+        for obj in self.objects.iter_mut() {
+            if obj.velocity != [0f32, 0f32] {
+                obj.pos.vec[0] += (obj.velocity[0] * 40.) * dt as f32;
+                obj.pos.vec[1] += (obj.velocity[1] * 40.) * dt as f32;
+                obj.velocity[0] -= obj.velocity[0] * 0.1;
+                obj.velocity[1] -= obj.velocity[1] * 0.1;
+            }
+        }
+
         self.connection.as_mut()
             .and_then(|ref mut connection| {
                 connection.listen_events()
@@ -204,10 +218,44 @@ impl Scene for Play {
     fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d) -> GameResult<()> {
         clear(BLACK, graphics);
 
+        let cursor = self.cursor.clone();
+
+        self.player()
+            .and_then(|player| {
+                Some((player.pos.clone(), player.direction.clone()))
+            })
+            .and_then(|(global_pos, dir)| {
+                let screen_pos = self.viewport.convert_world_pos(global_pos);
+                let pos = ctx.transform.trans(screen_pos.x().clone() as f64, screen_pos.y().clone() as f64);
+                let line = [
+                    0.,
+                    0.,
+                    (dir[0] * 20.) as f64,
+                    (dir[1] * 20.) as f64
+                ];
+                Line::new(WHITE, 0.5)
+                    .draw_arrow(line, 10., &ctx.draw_state, pos, graphics);
+
+                Some(())
+            });
+
+        self.player()
+            .and_then(|player| {
+                Some(player.pos.clone())
+            })
+            .and_then(|global_pos| {
+                let screen_pos = self.viewport.convert_world_pos(global_pos);
+                let line = [screen_pos.x().clone() as f64, screen_pos.y().clone() as f64, cursor[0], cursor[1]];
+                Line::new(WHITE, 0.5)
+                    .draw_arrow(line, 10., &ctx.draw_state, ctx.transform.clone(), graphics);
+
+                Some(())
+            });
+
         for obj in self.objects.iter() {
             let screen_pos = self.viewport.convert_world_pos(obj.pos.clone());
             let pos = ctx.transform.trans(screen_pos.x().clone() as f64, screen_pos.y().clone() as f64);
-            let square = rectangle::square(0., 0., 20.);
+            let square = rectangle::centered_square(0., 0., 10.);
             rectangle(obj.color.clone(), square, pos, graphics);
         }
 
@@ -262,9 +310,9 @@ impl Scene for Play {
                     let free_area = &self.free_area;
 
                     let intersect = (y < free_area.top_left.y().clone()) as u8 |
-                        (((y > free_area.bottom_right.y().clone() - 20.) as u8) << 1) |
+                        (((y > free_area.bottom_right.y().clone()) as u8) << 1) |
                         (((x < free_area.top_left.x().clone()) as u8) << 2) |
-                        (((x > free_area.bottom_right.x() - 20.) as u8) << 3);
+                        (((x > free_area.bottom_right.x().clone()) as u8) << 3);
 
                     if (intersect >> direction.clone() as u8) & 1 == 1 {
                         self.viewport.move_to(direction, step);
@@ -286,5 +334,9 @@ impl Scene for Play {
                     None
                 });
         }
+    }
+
+    fn mouse_move(&mut self, cursor: [f64; 2]) {
+        self.cursor = cursor;
     }
 }

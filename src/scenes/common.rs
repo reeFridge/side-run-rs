@@ -3,7 +3,7 @@ use piston_window::*;
 pub type GameResult<T> = Result<T, String>;
 
 pub struct Point<T> {
-    vec: [T; 2]
+    pub vec: [T; 2]
 }
 
 impl<T: Clone> Point<T> {
@@ -59,6 +59,18 @@ pub enum Direction {
     Left,
     Right,
     Stay
+}
+
+impl From<Direction> for [f32; 2] {
+    fn from(dir: Direction) -> Self {
+        match dir {
+            Direction::Left => [-1., 0.],
+            Direction::Right => [1., 0.],
+            Direction::Up => [0., -1.],
+            Direction::Down => [0., 1.],
+            Direction::Stay => [0f32; 2]
+        }
+    }
 }
 
 impl From<Key> for Direction {
