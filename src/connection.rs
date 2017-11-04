@@ -4,6 +4,7 @@ use std::time::Duration;
 use scenes::common::*;
 use std::io::{Read, Write};
 use piston_window::types::Color;
+use piston_window::math::Vec2d;
 
 pub type NetToken = usize;
 
@@ -48,10 +49,10 @@ impl Connection {
         }
     }
 
-    pub fn send_spawn_event(&mut self, name: String, pos: Point<f32>, color: Color) -> Result<(), String> {
+    pub fn send_spawn_event(&mut self, name: String, pos: Vec2d, color: Color) -> Result<(), String> {
         let token = self.token.clone();
-        let x = pos.x().clone();
-        let y = pos.y().clone();
+        let x = pos[0];
+        let y = pos[1];
 
         let u32_color = {
             let to_255 = 255f32;
@@ -75,9 +76,9 @@ impl Connection {
         Ok(())
     }
 
-    pub fn send_update_pos_event(&mut self, pos: Point<f32>) -> Result<(), String> {
-        let x = pos.x().clone();
-        let y = pos.y().clone();
+    pub fn send_update_pos_event(&mut self, pos: Vec2d) -> Result<(), String> {
+        let x = pos[0];
+        let y = pos[1];
         let token = self.token.clone();
         self.socket.write_all(format!("UPDP {}|{}x{}\r\n", token, x, y).as_bytes()).unwrap();
         self.socket.flush().unwrap();
@@ -96,25 +97,31 @@ impl Connection {
         }
     }
 
-    pub fn parse_update_pos_event(data: String) -> Result<(usize, Point<f32>), String> {
+    pub fn parse_update_pos_event(data: String) -> Result<(usize, Vec2d), String> {
         let str: Vec<&str> = data.as_str().split("\r\n").collect();
         let data_str = str[0].trim();
         let data_parts: Vec<&str> = data_str.split("|").collect();
         let token = data_parts[0].parse::<u64>().expect("token") as usize;
         let coords: Vec<&str> = data_parts[1].split("x").collect();
-        let pos = Point::<f32>::new(coords[0].parse::<f32>().expect("x"), coords[1].parse::<f32>().expect("y"));
+        let pos = Vec2d::from([
+            coords[0].parse::<f64>().expect("x"),
+            coords[1].parse::<f64>().expect("y")
+        ]);
 
         Ok((token, pos))
     }
 
-    pub fn parse_spawn_event(data: String) -> Result<(usize, String, Point<f32>, Color), String> {
+    pub fn parse_spawn_event(data: String) -> Result<(usize, String, Vec2d, Color), String> {
         let str: Vec<&str> = data.as_str().split("\r\n").collect();
         let data_str = str[0].trim();
         let data_parts: Vec<&str> = data_str.split("|").collect();
         let token = data_parts[0].parse::<u64>().expect("token") as usize;
         let name = data_parts[1].to_string();
         let coords: Vec<&str> = data_parts[2].split("x").collect();
-        let pos = Point::<f32>::new(coords[0].parse::<f32>().expect("x"), coords[1].parse::<f32>().expect("y"));
+        let pos = Vec2d::from([
+            coords[0].parse::<f64>().expect("x"),
+            coords[1].parse::<f64>().expect("y")
+        ]);
         let color_u = data_parts[3].parse::<u32>().expect("color");
 
         let inv_255 = 1.0f32 / 255.0f32;

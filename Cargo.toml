@@ -8,3 +8,4 @@ byteorder = "1"
 piston_window = "0.70.0"
 conrod = { version = "0.55", features = ["piston"] }
 find_folder = "0.3"
+vecmath = "*"

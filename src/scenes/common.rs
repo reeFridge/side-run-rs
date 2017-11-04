@@ -1,57 +1,20 @@
 use piston_window::*;
+use piston_window::math::*;
 
 pub type GameResult<T> = Result<T, String>;
 
-pub struct Point<T> {
-    pub vec: [T; 2]
-}
-
-impl<T: Clone> Point<T> {
-    pub fn new(x: T, y: T) -> Self {
-        Point { vec: [x, y] }
-    }
-
-    pub fn x(&self) -> &T {
-        &self.vec[0]
-    }
-
-    pub fn y(&self) -> &T {
-        &self.vec[1]
-    }
-
-    pub fn set(&mut self, point: Point<T>) {
-        self.vec = point.vec;
-    }
-
-    pub fn set_x(&mut self, x: T) {
-        self.vec[0] = x;
-    }
-
-    pub fn set_y(&mut self, y: T) {
-        self.vec[1] = y;
-    }
-
-    pub fn clone(&self) -> Point<T> {
-        Point { vec: [self.x().clone(), self.y().clone()] }
-    }
-}
-
 pub trait Movable {
-    fn translate_by_direction(&mut self, direction: Direction, units: f32);
+    fn translate_by_direction(&mut self, direction: Direction, units: f64);
 }
 
-impl Movable for Point<f32> {
-    fn translate_by_direction(&mut self, direction: Direction, units: f32) {
-        match direction {
-            Direction::Up => self.vec[1] -= units,
-            Direction::Down => self.vec[1] += units,
-            Direction::Left => self.vec[0] -= units,
-            Direction::Right => self.vec[0] += units,
-            Direction::Stay => ()
-        };
+impl Movable for Vec2d {
+    fn translate_by_direction(&mut self, direction: Direction, units: f64) {
+        let translate_vec = mul_scalar(Vec2d::from(direction), units);
+        *self = add(translate_vec, self.clone());
     }
 }
 
+// TODO: forward, back, left, right
 #[derive(Clone)]
 pub enum Direction {
     Up,
@@ -61,14 +24,14 @@ pub enum Direction {
     Stay
 }
 
-impl From<Direction> for [f32; 2] {
+impl From<Direction> for Vec2d {
     fn from(dir: Direction) -> Self {
         match dir {
-            Direction::Left => [-1., 0.],
-            Direction::Right => [1., 0.],
-            Direction::Up => [0., -1.],
-            Direction::Down => [0., 1.],
-            Direction::Stay => [0f32; 2]
+            Direction::Left => Vec2d::from([-1., 0.]),
+            Direction::Right => Vec2d::from([1., 0.]),
+            Direction::Up => Vec2d::from([0., -1.]),
+            Direction::Down => Vec2d::from([0., 1.]),
+            Direction::Stay => Vec2d::from([0f64; 2])
         }
     }
 }
@@ -81,20 +44,6 @@ impl From<Key> for Direction {
             Key::Right => Direction::Right,
             Key::Left => Direction::Left,
             _ => Direction::Stay
-        }
-    }
-}
-
-pub struct Rect<T: Clone> {
-    pub top_left: Point<T>,
-    pub bottom_right: Point<T>
-}
-
-impl<T: Clone> Rect<T> {
-    pub fn new(x: T, y: T, w: T, h: T) -> Self {
-        Rect {
-            top_left: Point::<T>::new(x, y),
-            bottom_right: Point::<T>::new(w, h)
         }
     }
 }
