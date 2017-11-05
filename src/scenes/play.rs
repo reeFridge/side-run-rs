@@ -14,28 +14,18 @@ use piston_window::types::Rectangle as Rect;
 const W_HEIGHT: f64 = 1000.0;
 const W_WIDTH: f64 = 1000.0;
 
-struct Camera {
-    obj: GameObject
+trait Camera {
+    fn world_to_screen(&self, world: Vec2d) -> Vec2d;
+    fn screen_to_world(&self, screen: Vec2d) -> Vec2d;
 }
 
-impl Camera {
-    fn new(x: f64, y: f64) -> Camera {
-        Camera { obj: GameObject::new(x, y, BLUE) }
-    }
-
+impl Camera for GameObject {
     fn world_to_screen(&self, world: Vec2d) -> Vec2d {
         sub(world,self.get_pos())
     }
+
     fn screen_to_world(&self, screen: Vec2d) -> Vec2d {
         add(self.get_pos(), screen)
-    }
-
-    fn get_pos(&self) -> Vec2d {
-        self.obj.get_pos()
-    }
-
-    fn move_to(&mut self, direction: Vec2d, speed: f64) {
-        self.obj.move_to(direction, speed);
     }
 }
 
@@ -124,7 +114,7 @@ pub struct PlayerConfig {
 pub struct Play {
     switcher: BaseSwitcher,
     free_area: Rect,
-    camera: Camera,
+    camera: GameObject,
     objects: Vec<GameObject>,
     players: HashMap<NetToken, Player>,
     connection: Option<Connection>,
@@ -143,7 +133,7 @@ impl Play {
         let mut play = Play {
             switcher: BaseSwitcher::new(None),
             objects: objects,
-            camera: Camera::new(0.0, 0.0),
+            camera: GameObject::new(0., 0., BLUE),
             players: HashMap::new(),
             free_area: Rect::from([200., 150., 600., 450.]),
             connection: None,
@@ -234,7 +224,7 @@ impl Scene for Play {
             obj.update_velocity(dt);
         }
 
-        self.camera.obj.update_velocity(dt);
+        self.camera.update_velocity(dt);
 
         let cursor = self.camera.screen_to_world(self.cursor);
 
