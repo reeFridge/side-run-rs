@@ -10,6 +10,12 @@ use std::f64;
 use vecmath::*;
 use piston_window::math::*;
 use piston_window::types::Rectangle as Rect;
+use cgmath;
+use collision as cgcoll;
+use collision::ContinuousTransformed;
+use collision::HasAabb;
+use cgmath::MetricSpace;
+use std::cmp::Ordering;
 
 const W_HEIGHT: f64 = 1000.0;
 const W_WIDTH: f64 = 1000.0;
@@ -21,7 +27,7 @@ trait Camera {
 
 impl Camera for GameObject {
     fn world_to_screen(&self, world: Vec2d) -> Vec2d {
-        sub(world,self.get_pos())
+        sub(world, self.get_pos())
     }
 
     fn screen_to_world(&self, screen: Vec2d) -> Vec2d {
@@ -43,17 +49,29 @@ struct GameObject {
     pos: Vec2d,
     rotation: f64,
     color: Color,
-    velocity: Vec2d
+    velocity: Vec2d,
+    rect: Option<Rect>
 }
 
 impl GameObject {
-    fn new(x: f64, y: f64, color: Color) -> GameObject {
+    fn new(x: f64, y: f64, color: Color, wh: Option<(f64, f64)>) -> GameObject {
+        let mut rect = None;
+
+        if let Some((hw, hh)) = wh {
+            rect = Some(rectangle::centered([0., 0., hw, hh]));
+        }
+
         GameObject {
             rotation: 0.,
             pos: Vec2d::from([x, y]),
             color: color,
-            velocity: Vec2d::from([0., 0.])
+            velocity: Vec2d::from([0., 0.]),
+            rect: rect
         }
+    }
+
+    fn get_shape(&self) -> Option<Rect> {
+        self.rect.clone()
     }
 
     fn get_pos(&self) -> Vec2d {
@@ -71,7 +89,7 @@ impl GameObject {
         }
     }
 
-    fn look_at(&mut self, target: Vec2d) -> Option<f64> {
+    fn look_at(&mut self, target: Vec2d) -> Option<(f64, Vec2d)> {
         let eye = self.get_pos();
         let current = sub(
             sub(eye, Vec2d::from([0., 20.])),
@@ -88,7 +106,7 @@ impl GameObject {
 
         self.rotation = angle;
 
-        Some(angle)
+        Some((angle, n_target))
     }
 
     fn move_to(&mut self, direction: Vec2d, speed: f64) -> Option<Vec2d> {
@@ -119,26 +137,42 @@ pub struct Play {
     players: HashMap<NetToken, Player>,
     connection: Option<Connection>,
     player_config: PlayerConfig,
-    cursor: [f64; 2]
+    cursor: [f64; 2],
+    intersects: Vec<cgmath::Point2<f64>>,
+    lines: Vec<[f64; 4]>
+}
+
+struct Intersection {
+    angle: f64,
+    point: cgmath::Point2<f64>
 }
 
 impl Play {
     pub fn new(auto_connect: Option<String>, player_config: PlayerConfig) -> Play {
         let objects = vec![
-            GameObject::new(200.0, 300.0, GREEN),
-            GameObject::new(500.0, 100.0, BLUE),
-            GameObject::new(50.0, 40.0, WHITE)
+            GameObject::new(300.0, 400.0, WHITE, Some((W_WIDTH / 2., W_HEIGHT / 2.))),
+            GameObject::new(200.0, 300.0, WHITE, Some((100., 10.))),
+            GameObject::new(500.0, 100.0, RED, Some((10., 100.))),
+            GameObject::new(50.0, 40.0, GREEN, Some((100., 100.))),
+            GameObject::new(600.0, 600.0, BLUE, Some((100., 150.))),
+
+            GameObject::new(50.0, 500.0, BLUE, Some((50., 50.))),
+            GameObject::new(50.0, 650.0, WHITE, Some((50., 50.))),
+            GameObject::new(200.0, 500.0, RED, Some((50., 50.))),
+            GameObject::new(200.0, 650.0, GREEN, Some((50., 50.)))
         ];
 
         let mut play = Play {
             switcher: BaseSwitcher::new(None),
             objects: objects,
-            camera: GameObject::new(0., 0., BLUE),
+            camera: GameObject::new(0., 0., BLUE, None),
             players: HashMap::new(),
             free_area: Rect::from([200., 150., 600., 450.]),
             connection: None,
             player_config: player_config,
-            cursor: [0f64; 2]
+            cursor: [0f64; 2],
+            intersects: vec![],
+            lines: vec![]
         };
 
         if let Some(addr) = auto_connect {
@@ -159,7 +193,7 @@ impl Play {
                     self.connection = Some(connection);
 
                     Ok(())
-                },
+                }
                 Err(err) => Err(err)
             },
             Err(e) => Err(format!("{:?}", e.kind()))
@@ -168,7 +202,7 @@ impl Play {
 
     fn spawn_player(&mut self, token: NetToken, pos: Vec2d, name: String, color: Color) {
         let idx = self.objects.len();
-        self.objects.push(GameObject::new(pos[0], pos[1], color));
+        self.objects.push(GameObject::new(pos[0], pos[1], color, None));
 
         self.players.insert(token, Player {
             name: name,
@@ -214,6 +248,14 @@ impl Play {
     }
 }
 
+fn transform(dx: f64, dy: f64, rot: f64) -> cgmath::Decomposed<cgmath::Vector2<f64>, cgmath::Basis2<f64>> {
+    cgmath::Decomposed {
+        scale: 1.,
+        rot: cgmath::Rotation2::from_angle(cgmath::Rad(rot)),
+        disp: cgmath::Vector2::new(dx, dy),
+    }
+}
+
 impl Scene for Play {
     fn switcher(&mut self) -> &mut Switcher {
         &mut self.switcher
@@ -226,12 +268,82 @@ impl Scene for Play {
 
         self.camera.update_velocity(dt);
 
+        let global_player_pos = self.player()
+            .and_then(|obj| {
+                Some(obj.get_pos())
+            });
+
         let cursor = self.camera.screen_to_world(self.cursor);
 
-        let rot = self.player()
-            .and_then(|player_obj| {
-                player_obj.look_at(cursor)
+        self.player()
+            .and_then(|obj| {
+                obj.look_at(cursor)
             });
+
+        let cursor = self.cursor;
+
+        let mut angles = vec![];
+        let mut intersects = vec![];
+        if let Some(global_pos) = global_player_pos {
+            for obj in self.objects.iter() {
+                if let Some(shape) = obj.get_shape() {
+                    let collision_box = cgcoll::primitive::Rectangle::new(shape[2], shape[3]);
+                    let screen_pos = self.camera.world_to_screen(obj.get_pos());
+                    let corners = collision_box.get_bound().to_corners();
+
+                    for corner in corners.iter() {
+                        let corner_screen = add([corner.x, corner.y], screen_pos);
+                        let n = vec2_normalized(sub(corner_screen, cursor));
+                        let angle = n[1].atan2(n[0]);
+
+                        angles.push(angle);
+                        angles.push(angle - 0.00001);
+                        angles.push(angle + 0.00001);
+                    }
+                }
+            }
+        }
+
+        for angle in angles.iter() {
+            let direction = [angle.cos(), angle.sin()];
+            let ray = cgcoll::Ray2::new(cursor.into(), direction.into());
+
+            let mut closest_intersect: Option<cgmath::Point2<f64>> = None;
+            for obj in self.objects.iter() {
+                if let Some(shape) = obj.get_shape() {
+                    let collision_box = cgcoll::primitive::Rectangle::new(shape[2], shape[3]);
+                    let screen_pos = self.camera.world_to_screen(obj.get_pos());
+                    let transform = transform(screen_pos[0], screen_pos[1], 0.);
+
+                    if let Some(result) = collision_box.intersection_transformed(&ray, &transform) {
+                        if let Some(closest) = closest_intersect {
+                            let closest_dist = closest.distance(cursor.into());
+                            let dist = result.distance(cursor.into());
+
+                            if dist < closest_dist {
+                                closest_intersect = Some(result);
+                            }
+                        } else {
+                            closest_intersect = Some(result);
+                        }
+                    }
+                }
+            }
+
+            if let Some(closest) = closest_intersect {
+                intersects.push(Intersection { angle: angle.clone(), point: closest });
+            }
+        }
+
+        intersects.sort_by(|a, b| {
+           b.angle.partial_cmp(&a.angle).unwrap_or(Ordering::Equal)
+        });
+
+        for intersect in intersects.iter() {
+            self.intersects.push(intersect.point);
+            let line = [cursor[0], cursor[1], intersect.point.x, intersect.point.y];
+            self.lines.push(line);
+        }
 
         /*self.connection.as_mut()
             .and_then(|ref mut connection| {
@@ -322,11 +434,29 @@ impl Scene for Play {
             });
 
         for obj in self.objects.iter() {
-            let screen_pos = self.camera.world_to_screen(obj.get_pos());
-            let pos = multiply(ctx.transform, translate(screen_pos)).rot_rad(obj.rotation);
-            let square = rectangle::centered_square(0., 0., 10.);
-            rectangle(obj.color.clone(), square, pos, graphics);
+            if let Some(shape) = obj.get_shape() {
+                let screen_pos = self.camera.world_to_screen(obj.get_pos());
+                let pos = multiply(ctx.transform, translate(screen_pos)).rot_rad(obj.rotation);
+                let obj_border = Rectangle::new_border(obj.color.clone(), 0.5);
+                obj_border.draw(shape, &ctx.draw_state, pos, graphics);
+            }
         }
+
+        let cursor = self.camera.screen_to_world(self.cursor);
+
+        for ray_line in self.lines.iter() {
+            line(RED, 0.5, ray_line.clone(), ctx.transform.clone(), graphics);
+        }
+
+        if self.intersects.len() != 0 {
+            for p in self.intersects.iter() {
+                let rect = rectangle::centered_square(0., 0., 2.);
+                rectangle(WHITE, rect, ctx.transform.trans(p.x, p.y), graphics);
+            }
+        }
+
+        self.lines.drain(..);
+        self.intersects.drain(..);
 
         self.player()
             .and_then(|player_obj| {
@@ -338,17 +468,17 @@ impl Scene for Play {
                 let right = player_transform.rot_rad(f64::consts::PI / 4.);
                 let left = player_transform.rot_rad(-f64::consts::PI / 4.);
 
-                line(RED, 0.5, [0.,-20.,0.,-40.], right, graphics);
-                line(WHITE, 0.5, [0.,-20.,0.,-40.], player_transform, graphics);
-                line(GREEN, 0.5, [0.,-20.,0.,-40.], left, graphics);
+                line(RED, 0.5, [0., -20., 0., -40.], right, graphics);
+                line(WHITE, 0.5, [0., -20., 0., -40.], player_transform, graphics);
+                line(GREEN, 0.5, [0., -20., 0., -40.], left, graphics);
 
                 Some(())
             });
 
-        let area = &self.free_area;
+        /*let area = &self.free_area;
         let rect = rectangle::rectangle_by_corners(area[0], area[1], area[2], area[3]);
         let area_border = Rectangle::new_border([0., 0., 1., 0.1], 0.5);
-        area_border.draw(rect, &ctx.draw_state, ctx.transform.clone(), graphics);
+        area_border.draw(rect, &ctx.draw_state, ctx.transform.clone(), graphics);*/
 
         Ok(())
     }
@@ -365,7 +495,7 @@ impl Scene for Play {
                         Key::Space => {
                             let spawn_pos = Vec2d::from([400., 300.]);
                             self.spawn_self_player(spawn_pos);
-                        },
+                        }
                         _ => ()
                     };
 

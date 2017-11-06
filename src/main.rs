@@ -2,6 +2,8 @@ extern crate piston_window;
 extern crate byteorder;
 extern crate find_folder;
 extern crate vecmath;
+extern crate cgmath;
+extern crate collision;
 
 #[macro_use]
 extern crate conrod;
