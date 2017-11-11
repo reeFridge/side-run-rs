@@ -16,6 +16,8 @@ use collision::ContinuousTransformed;
 use collision::HasAabb;
 use cgmath::MetricSpace;
 use std::cmp::Ordering;
+use button_tracker::ButtonController;
+use asset_manager::AssetManager;
 
 const W_HEIGHT: f64 = 1000.0;
 const W_WIDTH: f64 = 1000.0;
@@ -79,11 +81,11 @@ impl GameObject {
     }
 
     fn update_velocity(&mut self, dt: f64) {
-        if vec2_len(self.velocity) != 0. {
+        if vec2_len(self.velocity) > 0.5 {
             let transform = translate(mul_scalar(self.velocity, dt));
-            let resistance = 0.9;
+            let friction = 0.8;
             self.pos = transform_pos(transform, self.pos);
-            self.velocity = mul_scalar(self.velocity, resistance);
+            self.velocity = mul_scalar(self.velocity, friction);
         } else {
             self.velocity = Vec2d::from([0., 0.]);
         }
@@ -91,22 +93,12 @@ impl GameObject {
 
     fn look_at(&mut self, target: Vec2d) -> Option<(f64, Vec2d)> {
         let eye = self.get_pos();
-        let current = sub(
-            sub(eye, Vec2d::from([0., 20.])),
-            eye
-        );
-        let target = sub(Vec2d::from(target), eye);
-        let n_target = vec2_normalized(target);
-        let n_current = vec2_normalized(current);
-        let mut angle = vec2_dot(n_current, n_target).acos();
-
-        if n_target[0] < 0. {
-            angle = f64::consts::PI * 2. - angle;
-        }
+        let n = vec2_normalized(sub(eye, target));
+        let angle = n[1].atan2(n[0]);
 
         self.rotation = angle;
 
-        Some((angle, n_target))
+        Some((angle, n))
     }
 
     fn move_to(&mut self, direction: Vec2d, speed: f64) -> Option<Vec2d> {
@@ -138,8 +130,7 @@ pub struct Play {
     connection: Option<Connection>,
     player_config: PlayerConfig,
     cursor: [f64; 2],
-    intersects: Vec<cgmath::Point2<f64>>,
-    lines: Vec<[f64; 4]>
+    button_tracker: ButtonController
 }
 
 struct Intersection {
@@ -150,7 +141,7 @@ struct Intersection {
 impl Play {
     pub fn new(auto_connect: Option<String>, player_config: PlayerConfig) -> Play {
         let objects = vec![
-            GameObject::new(300.0, 400.0, WHITE, Some((W_WIDTH / 2., W_HEIGHT / 2.))),
+            GameObject::new(400.0, 300.0, WHITE, Some((W_WIDTH / 2., W_HEIGHT / 2.))),
             GameObject::new(200.0, 300.0, WHITE, Some((100., 10.))),
             GameObject::new(500.0, 100.0, RED, Some((10., 100.))),
             GameObject::new(50.0, 40.0, GREEN, Some((100., 100.))),
@@ -170,8 +161,7 @@ impl Play {
             connection: None,
             player_config: player_config,
             cursor: [0f64; 2],
-            intersects: vec![],
-            lines: vec![]
+            button_tracker: ButtonController::new()
         };
 
         if let Some(addr) = auto_connect {
@@ -182,6 +172,14 @@ impl Play {
         }
 
         play
+    }
+
+    fn render_texture(&mut self, name: &'static str, rect: Rect, transform: Matrix2d, graphics: &mut G2d, asset_manager: &mut AssetManager) {
+        let image = Image::new().rect(rect);
+
+        if let Some(texture) = asset_manager.get_texture(name) {
+            image.draw(texture, &DrawState::default(), transform, graphics);
+        }
     }
 
     pub fn connect(&mut self, host: String) -> Result<(), String> {
@@ -234,7 +232,7 @@ impl Play {
         });
     }
 
-    fn player(&mut self) -> Option<&mut GameObject> {
+    fn player_mut(&mut self) -> Option<&mut GameObject> {
         let token = match self.connection {
             Some(Connection { ref token, .. }) => token.clone(),
             None => 0 as NetToken
@@ -242,6 +240,18 @@ impl Play {
 
         match self.players.get_mut(&token) {
             Some(&mut Player { obj_index: ref idx, .. }) => self.objects.get_mut(idx.clone()),
+            None => None
+        }
+    }
+
+    fn player(&self) -> Option<&GameObject> {
+        let token = match self.connection {
+            Some(Connection { ref token, .. }) => token.clone(),
+            None => 0 as NetToken
+        };
+
+        match self.players.get(&token) {
+            Some(&Player { obj_index: ref idx, .. }) => self.objects.get(idx.clone()),
             None => None
         }
     }
@@ -261,100 +271,93 @@ impl Scene for Play {
     }
 
     fn update(&mut self, dt: f64) -> GameResult<()> {
+        self.button_tracker.update();
+
         for obj in self.objects.iter_mut() {
             obj.update_velocity(dt);
         }
 
         self.camera.update_velocity(dt);
 
-        /*self.connection.as_mut()
-            .and_then(|ref mut connection| {
-                connection.listen_events()
-            })
-            .and_then(|(event_type, data)| {
-                match event_type {
-                    EventType::Spawn => {
-                        let (token, name, pos, color) = Connection::parse_spawn_event(data).unwrap();
-                        self.spawn_player(token, pos, name, color);
-                    },
-                    EventType::UpdatePos => {
-                        let (token, pos) = Connection::parse_update_pos_event(data).unwrap();
-                        self.update_player_pos(token, pos);
-                    }
-                };
+        if self.player().is_some() {
+            let movement_keys = [
+                Key::Up,
+                Key::Down,
+                Key::Left,
+                Key::Right
+            ];
 
-                Some(())
-            });*/
+            for key in movement_keys.iter() {
+                let key_pressed = self.button_tracker.current_pressed(&Button::Keyboard(key.clone()));
+
+                if key_pressed {
+                    self.player_mut().unwrap().move_to(Vec2d::from(Direction::from(key.clone())), 200.);
+                }
+            }
+        }
+
+        // update camera pos
+        {
+            let (x, y) = if let Some(obj) = self.player() {
+                self.camera.world_to_screen(obj.get_pos()).x_y()
+            } else {
+                self.cursor.x_y()
+            };
+
+            let free_camera_area = &self.free_area;
+
+            let intersect = (y - 10. < free_camera_area[1]) as u8 |
+                (((y + 10. > free_camera_area[3]) as u8) << 1) |
+                (((x - 10. < free_camera_area[0]) as u8) << 2) |
+                (((x + 10. > free_camera_area[2]) as u8) << 3);
+
+            let mut dir = Vec2d::from([0f64; 2]);
+
+            fn add_direction_if_intersect(direction: Direction, to: Vec2d, intersect: u8) -> Vec2d {
+                if (intersect >> direction.clone() as u8) & 1 == 1 {
+                    add(to, direction.into())
+                } else {
+                    add(to, [0f64; 2])
+                }
+            }
+
+            dir = add_direction_if_intersect(Direction::Up, dir, intersect);
+            dir = add_direction_if_intersect(Direction::Down, dir, intersect);
+            dir = add_direction_if_intersect(Direction::Right, dir, intersect);
+            dir = add_direction_if_intersect(Direction::Left, dir, intersect);
+
+            if dir != [0f64; 2] {
+                let camera_pos = self.camera.get_pos();
+                let c_x = (free_camera_area[0] - free_camera_area[2]) / 2.;
+                let c_y = (free_camera_area[1] - free_camera_area[3]) / 2.;
+                let center = sub([free_camera_area[0], free_camera_area[1]], [c_x, c_y]);
+                self.camera.move_to(vec2_normalized(dir), 150.);
+            }
+        }
 
         Ok(())
     }
 
-    fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d) -> GameResult<()> {
+    fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d, asset_manager: &mut AssetManager) -> GameResult<()> {
         clear(BLACK, graphics);
 
-        /*self.player()
-            .and_then(|player| {
-                Some((player.pos.clone(), player.rotation.clone()))
-            })
-            .and_then(|(global_pos, rotation)| {
-                let screen_pos = self.camera.world_to_screen(global_pos);
-                let pos = ctx.transform
-                    .trans(screen_pos[0], screen_pos[1])
-                    .rot_rad(rotation);
+        let pos = self.camera.world_to_screen([-100., -200.]);
+        let (tile_width, tile_height) = (200., 200.);
+        let iter_x = (W_WIDTH / tile_width) as i32;
+        let iter_y = (W_HEIGHT / tile_height) as i32;
+        let t = ctx.transform.trans(pos[0], pos[1]);
+        for i in 0 .. iter_x {
+            for j in 0 .. iter_y {
+                let rect = [0. + tile_width * i as f64, 0. + tile_height * j as f64, tile_width, tile_height];
+                self.render_texture("floor", rect, t, graphics, asset_manager);
+            }
+        }
 
-                let (dir_up, dir_down): ([f64; 2], [f64; 2]) = (Direction::Up.into(), Direction::Down.into());
-
-                let line_up = [0., 0., 0., 20. * dir_up[1]];
-                let line_down = [0., 0., 0., 20. * dir_down[1]];
-
-                Line::new(GREEN, 0.5)
-                    .draw_arrow(line_up, 5., &ctx.draw_state, pos, graphics);
-
-                Line::new(RED, 0.5)
-                    .draw_arrow(line_down, 5., &ctx.draw_state, pos, graphics);
-
-                Some(())
-            });*/
-        self.player()
-            .and_then(|player| {
-                Some(player.get_pos())
-            })
-            .and_then(|player_pos| {
-                let screen_pos = self.camera.world_to_screen(player_pos);
-                let (x, y) = screen_pos.x_y();
-
-                let free_camera_area = &self.free_area;
-
-                let intersect = (y - 10. < free_camera_area[1]) as u8 |
-                    (((y + 10. > free_camera_area[3]) as u8) << 1) |
-                    (((x - 10. < free_camera_area[0]) as u8) << 2) |
-                    (((x + 10. > free_camera_area[2]) as u8) << 3);
-
-                let mut dir = Vec2d::from([0f64; 2]);
-
-                fn add_direction_if_intersect(direction: Direction, to: Vec2d, intersect: u8) -> Vec2d {
-                    if (intersect >> direction.clone() as u8) & 1 == 1 {
-                        add(to, direction.into())
-                    } else {
-                        add(to, [0f64; 2])
-                    }
-                }
-
-                dir = add_direction_if_intersect(Direction::Up, dir, intersect);
-                dir = add_direction_if_intersect(Direction::Down, dir, intersect);
-                dir = add_direction_if_intersect(Direction::Right, dir, intersect);
-                dir = add_direction_if_intersect(Direction::Left, dir, intersect);
-
-                if dir != [0f64; 2] {
-                    let camera_pos = self.camera.get_pos();
-                    let c_x = (free_camera_area[0] - free_camera_area[2]) / 2.;
-                    let c_y = (free_camera_area[1] - free_camera_area[3]) / 2.;
-                    let center = sub([free_camera_area[0], free_camera_area[1]], [c_x, c_y]);
-                    self.camera.move_to(vec2_normalized(dir), 150.);
-                }
-
-                Some(())
-            });
+        // turn texture to black
+        let pos = self.camera.world_to_screen([400., 300.]);
+        let t = ctx.transform.trans(pos[0], pos[1]);
+        let rect = rectangle::centered([0., 0., W_WIDTH / 2., W_HEIGHT / 2.]);
+        rectangle([0., 0., 0., 0.96], rect, t, graphics);
 
         for obj in self.objects.iter() {
             if let Some(shape) = obj.get_shape() {
@@ -365,22 +368,27 @@ impl Scene for Play {
             }
         }
 
-        let global_player_pos = self.player()
-            .and_then(|obj| {
-                Some(obj.get_pos())
-            });
-
         let cursor = self.camera.screen_to_world(self.cursor);
 
-        if let Some(obj) = self.player() {
+        if let Some(obj) = self.player_mut() {
             obj.look_at(cursor);
         }
 
-        let cursor = self.cursor;
+        {
+            let source = if let Some(obj) = self.player() {
+                self.camera.world_to_screen(obj.get_pos())
+            } else {
+                self.cursor
+            };
 
-        let mut angles = vec![];
-        let mut intersects = vec![];
-        if let Some(global_pos) = global_player_pos {
+            let rotation = if let Some(obj) = self.player() {
+                obj.rotation.clone()
+            } else {
+                0.
+            };
+
+            let mut angles = vec![];
+            let mut intersects = vec![];
             for obj in self.objects.iter() {
                 if let Some(shape) = obj.get_shape() {
                     let collision_box = cgcoll::primitive::Rectangle::new(shape[2], shape[3]);
@@ -389,7 +397,7 @@ impl Scene for Play {
 
                     for corner in corners.iter() {
                         let corner_screen = add([corner.x, corner.y], screen_pos);
-                        let n = vec2_normalized(sub(corner_screen, cursor));
+                        let n = vec2_normalized(sub(corner_screen, source));
                         let angle = n[1].atan2(n[0]);
 
                         angles.push(angle);
@@ -398,113 +406,119 @@ impl Scene for Play {
                     }
                 }
             }
-        }
 
-        for angle in angles.iter() {
-            let direction = [angle.cos(), angle.sin()];
-            let ray = cgcoll::Ray2::new(cursor.into(), direction.into());
+            for angle in angles.iter() {
+                let direction = [angle.cos(), angle.sin()];
+                let ray = cgcoll::Ray2::new(source.into(), direction.into());
 
-            let mut closest_intersect: Option<cgmath::Point2<f64>> = None;
-            for obj in self.objects.iter() {
-                if let Some(shape) = obj.get_shape() {
-                    let collision_box = cgcoll::primitive::Rectangle::new(shape[2], shape[3]);
-                    let screen_pos = self.camera.world_to_screen(obj.get_pos());
-                    let transform = transform(screen_pos[0], screen_pos[1], 0.);
+                let mut closest_intersect: Option<cgmath::Point2<f64>> = None;
+                for obj in self.objects.iter() {
+                    if let Some(shape) = obj.get_shape() {
+                        let collision_box = cgcoll::primitive::Rectangle::new(shape[2], shape[3]);
+                        let screen_pos = self.camera.world_to_screen(obj.get_pos());
+                        let transform = transform(screen_pos[0], screen_pos[1], 0.);
 
-                    if let Some(result) = collision_box.intersection_transformed(&ray, &transform) {
-                        if let Some(closest) = closest_intersect {
-                            let closest_dist = closest.distance(cursor.into());
-                            let dist = result.distance(cursor.into());
+                        if let Some(result) = collision_box.intersection_transformed(&ray, &transform) {
+                            if let Some(closest) = closest_intersect {
+                                let closest_dist = closest.distance(source.into());
+                                let dist = result.distance(source.into());
 
-                            if dist < closest_dist {
+                                if dist < closest_dist {
+                                    closest_intersect = Some(result);
+                                }
+                            } else {
                                 closest_intersect = Some(result);
                             }
-                        } else {
-                            closest_intersect = Some(result);
                         }
                     }
                 }
+
+                if let Some(closest) = closest_intersect {
+                    intersects.push(Intersection { angle: angle.clone(), point: closest });
+                    /* Some tries to decrease counts of intersection points
+                       idea: deal only with closest corners
+
+                    'objects: for obj in self.objects.iter() {
+                        if let Some(shape) = obj.get_shape() {
+                            let collision_box = cgcoll::primitive::Rectangle::new(shape[2], shape[3]);
+                            let screen_pos = self.camera.world_to_screen(obj.get_pos());
+                            let corners = collision_box.get_bound().to_corners();
+
+                            'corners: for corner in corners.iter() {
+                                let corner_screen = add([corner.x, corner.y], screen_pos);
+
+                                if closest.distance(corner_screen.into()) < 0.5 {
+                                    intersects.push(Intersection { angle: angle.clone(), point: closest });
+                                    break 'objects;
+                                }
+                            }
+                        }
+                    }*/
+                }
             }
 
-            if let Some(closest) = closest_intersect {
-                intersects.push(Intersection { angle: angle.clone(), point: closest });
-            }
-        }
+            intersects.sort_by(|a, b| {
+                b.angle.partial_cmp(&a.angle).unwrap_or(Ordering::Equal)
+            });
 
-        intersects.sort_by(|a, b| {
-            b.angle.partial_cmp(&a.angle).unwrap_or(Ordering::Equal)
-        });
-
-        for (i, &Intersection { angle: _, point: p }) in intersects.iter().enumerate() {
-                //if i < 6 {
+            let grey = [0.2, 0.2, 0.2, 0.2];
+            for (i, &Intersection { angle: _, point: p }) in intersects.iter().enumerate() {
                 if intersects.len() > i + 1 {
                     let next = intersects[i + 1].point;
                     let polygon_points = [
                         [p.x, p.y],
                         [next.x, next.y],
-                        [self.cursor[0], self.cursor[1]]
+                        [source[0], source[1]]
                     ];
-                    polygon([0.2, 0.2, 0.2, 0.1], &polygon_points, ctx.transform.clone(), graphics);
+                    polygon(grey, &polygon_points, ctx.transform.clone(), graphics);
                 }
 
+                // last triangle end-start
                 if i == intersects.len() - 1 {
                     let first = intersects[0].point;
                     let polygon_points = [
                         [p.x, p.y],
                         [first.x, first.y],
-                        [self.cursor[0], self.cursor[1]]
+                        [source[0], source[1]]
                     ];
-                    polygon([0.2, 0.2, 0.2, 0.1], &polygon_points, ctx.transform.clone(), graphics);
+                    polygon(grey, &polygon_points, ctx.transform.clone(), graphics);
                 }
+
+                rectangle(WHITE, rectangle::centered_square(p.x, p.y, 2.), ctx.transform.clone(), graphics);
+            }
         }
 
-        //self.lines.drain(..);
-        //self.intersects.drain(..);
+        if self.player().is_some() {
+            let rot = self.player().unwrap().rotation.clone();
+            let pos = self.player().unwrap().get_pos();
+            let screen_pos = self.camera.world_to_screen(pos);
+            let player_transform = multiply(ctx.transform, translate(screen_pos)).rot_rad(rot);
 
-        self.player()
-            .and_then(|player_obj| {
-                Some((player_obj.get_pos(), player_obj.rotation))
-            })
-            .and_then(|(pos, rot)| {
-                let screen_pos = self.camera.world_to_screen(pos);
-                let player_transform = multiply(ctx.transform, translate(screen_pos)).rot_rad(rot);
-                let right = player_transform.rot_rad(f64::consts::PI / 4.);
-                let left = player_transform.rot_rad(-f64::consts::PI / 4.);
-
-                line(RED, 0.5, [0., -20., 0., -40.], right, graphics);
-                line(WHITE, 0.5, [0., -20., 0., -40.], player_transform, graphics);
-                line(GREEN, 0.5, [0., -20., 0., -40.], left, graphics);
-
-                Some(())
-            });
-
-        /*let area = &self.free_area;
-        let rect = rectangle::rectangle_by_corners(area[0], area[1], area[2], area[3]);
-        let area_border = Rectangle::new_border([0., 0., 1., 0.1], 0.5);
-        area_border.draw(rect, &ctx.draw_state, ctx.transform.clone(), graphics);*/
+            let rect = rectangle::centered_square(0.0, 0.0, 50.0);
+            self.render_texture("player_sprite", rect, player_transform, graphics, asset_manager);
+        }
 
         Ok(())
     }
 
     fn key_press(&mut self, button: Button) {
-        //TODO: Fix handling space key only if player not spawned
-        if let Button::Keyboard(key) = button {
-            self.player()
-                .and_then(|ref mut player| {
-                    player.move_to(Vec2d::from(Direction::from(key)), 200.)
-                })
-                .or_else(|| {
-                    match key {
-                        Key::Space => {
-                            let spawn_pos = Vec2d::from([400., 300.]);
-                            self.spawn_self_player(spawn_pos);
-                        }
-                        _ => ()
-                    };
+        self.button_tracker.register_press(&button);
 
-                    None
-                });
+        if self.player().is_none() {
+            if let Button::Keyboard(key) = button {
+                match key {
+                    Key::Space => {
+                        let spawn_pos = Vec2d::from([400., 300.]);
+                        self.spawn_self_player(spawn_pos);
+                    }
+                    _ => ()
+                };
+            }
         }
+    }
+
+    fn key_release(&mut self, button: Button) {
+        self.button_tracker.register_release(&button);
     }
 
     fn mouse_move(&mut self, cursor: [f64; 2]) {

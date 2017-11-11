@@ -4,6 +4,7 @@ use scenes::play::{Play, PlayerConfig};
 use find_folder;
 use conrod::{self, widget, Colorable, Positionable, Widget, Labelable, Sizeable, color};
 use piston_window::*;
+use asset_manager::AssetManager;
 
 widget_ids!(struct Ids {
     text,
@@ -23,14 +24,13 @@ pub struct Menu {
     ids: Ids,
     image_map: conrod::image::Map<G2dTexture>,
     glyph_cache: conrod::text::GlyphCache,
-    text_texture_cache: G2dTexture,
     input_host_text: String,
     input_name_text: String,
     color: color::Color
 }
 
 impl Menu {
-    pub fn new(text_texture_cache: G2dTexture) -> Menu {
+    pub fn new() -> Menu {
         let mut ui = conrod::UiBuilder::new([800., 600.]).build();
 
         let assets = find_folder::Search::KidsThenParents(3, 5).for_folder("assets").unwrap();
@@ -48,7 +48,6 @@ impl Menu {
             ui: ui,
             image_map: conrod::image::Map::<G2dTexture>::new(),
             glyph_cache: conrod::text::GlyphCache::new(WIDTH, HEIGHT, SCALE_TOLERANCE, POSITION_TOLERANCE),
-            text_texture_cache: text_texture_cache,
             input_host_text: String::from("127.0.0.1:7001"),
             input_name_text: String::from("Fridge"),
             color: color::Color::from(color::Rgba(1., 0., 0., 1.))
@@ -155,7 +154,7 @@ impl Scene for Menu {
         &mut self.switcher
     }
 
-    fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d) -> GameResult<()> {
+    fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d, asset_manager: &mut AssetManager) -> GameResult<()> {
         // A function used for caching glyphs to the texture cache.
         fn cache_queued_glyphs(graphics: &mut G2d, cache: &mut G2dTexture, rect: conrod::text::rt::Rect<u32>, data: &[u8]) {
             let mut text_vertex_data = Vec::new();
@@ -180,7 +179,7 @@ impl Scene for Menu {
                 primitives,
                 ctx.clone(),
                 graphics,
-                &mut self.text_texture_cache,
+                asset_manager.get_texture_mut("ui_cache").unwrap(),
                 &mut self.glyph_cache,
                 &self.image_map,
                 cache_queued_glyphs,

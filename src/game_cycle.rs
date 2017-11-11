@@ -1,13 +1,15 @@
 use piston_window::*;
 use scenes::scene::SceneInstance;
+use asset_manager::AssetManager;
 
 pub struct GameCycle {
-    scene: SceneInstance
+    scene: SceneInstance,
+    asset_manager: AssetManager
 }
 
 impl GameCycle {
-    pub fn new(scene: SceneInstance) -> GameCycle {
-        GameCycle { scene: scene }
+    pub fn new(scene: SceneInstance, asset_manager: AssetManager) -> GameCycle {
+        GameCycle { scene, asset_manager }
     }
 
     pub fn run(&mut self, window: &mut PistonWindow) {
@@ -24,13 +26,14 @@ impl GameCycle {
                 event.button(|ButtonArgs { state: button_state, button, .. }| {
                     match button_state {
                         ButtonState::Press => self.scene.key_press(button),
+                        ButtonState::Release => self.scene.key_release(button),
                         _ => ()
                     }
                 });
 
                 event.render(|_| {
                     window.draw_2d(&event, |mut ctx, mut graph| {
-                        self.scene.draw(&mut ctx, &mut graph).unwrap();
+                        self.scene.draw(&mut ctx, &mut graph, &mut self.asset_manager).unwrap();
                     });
                 });
 

@@ -1,13 +1,15 @@
 use piston_window::*;
 use scenes::common::*;
+use asset_manager::AssetManager;
 
 pub type SceneInstance = Box<Scene>;
 
 pub trait Scene {
     fn handle_event(&mut self, _event: Event) {()}
     fn update(&mut self, _dt: f64) -> GameResult<()> {Ok(())}
-    fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d) -> GameResult<()>;
+    fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d, asset_manager: &mut AssetManager) -> GameResult<()>;
     fn key_press(&mut self, _button: Button) {()}
+    fn key_release(&mut self, _button: Button) {()}
     fn mouse_move(&mut self, _cursor: [f64; 2]) {()}
     fn switcher(&mut self) -> &mut Switcher;
 }
