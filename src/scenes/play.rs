@@ -13,8 +13,10 @@ use piston_window::types::Rectangle as Rect;
 use cgmath;
 use collision as cgcoll;
 use collision::ContinuousTransformed;
+use collision::DiscreteTransformed;
 use collision::HasAabb;
 use cgmath::MetricSpace;
+use cgmath::Rotation;
 use std::cmp::Ordering;
 use button_tracker::ButtonController;
 use asset_manager::AssetManager;
@@ -130,11 +132,17 @@ pub struct Play {
     connection: Option<Connection>,
     player_config: PlayerConfig,
     cursor: [f64; 2],
-    button_tracker: ButtonController
+    button_tracker: ButtonController,
+    prev_not: Option<Vec2d>
+}
+
+struct Angle {
+    rad: f64,
+    color: Color
 }
 
 struct Intersection {
-    angle: f64,
+    angle: Angle,
     point: cgmath::Point2<f64>
 }
 
@@ -161,7 +169,8 @@ impl Play {
             connection: None,
             player_config: player_config,
             cursor: [0f64; 2],
-            button_tracker: ButtonController::new()
+            button_tracker: ButtonController::new(),
+            prev_not: None
         };
 
         if let Some(addr) = auto_connect {
@@ -298,41 +307,26 @@ impl Scene for Play {
 
         // update camera pos
         {
-            let (x, y) = if let Some(obj) = self.player() {
-                self.camera.world_to_screen(obj.get_pos()).x_y()
+            let screen_vec = if let Some(obj) = self.player() {
+                self.camera.world_to_screen(obj.get_pos())
             } else {
-                self.cursor.x_y()
+                self.cursor
             };
 
-            let free_camera_area = &self.free_area;
+            let center = cgmath::Point2::<f64>::from([400., 300.]);
+            let screen_x = cgmath::Point2::<f64>::from([screen_vec[0], center.y]);
+            let screen_y = cgmath::Point2::<f64>::from([center.x, screen_vec[1]]);
+            let mut direction = Vec2d::from([0., 0.]);
 
-            let intersect = (y - 10. < free_camera_area[1]) as u8 |
-                (((y + 10. > free_camera_area[3]) as u8) << 1) |
-                (((x - 10. < free_camera_area[0]) as u8) << 2) |
-                (((x + 10. > free_camera_area[2]) as u8) << 3);
-
-            let mut dir = Vec2d::from([0f64; 2]);
-
-            fn add_direction_if_intersect(direction: Direction, to: Vec2d, intersect: u8) -> Vec2d {
-                if (intersect >> direction.clone() as u8) & 1 == 1 {
-                    add(to, direction.into())
-                } else {
-                    add(to, [0f64; 2])
-                }
+            if center.distance(screen_x) > 150. {
+                direction = add(direction, [screen_x.x - center.x, 0.]);
             }
 
-            dir = add_direction_if_intersect(Direction::Up, dir, intersect);
-            dir = add_direction_if_intersect(Direction::Down, dir, intersect);
-            dir = add_direction_if_intersect(Direction::Right, dir, intersect);
-            dir = add_direction_if_intersect(Direction::Left, dir, intersect);
-
-            if dir != [0f64; 2] {
-                let camera_pos = self.camera.get_pos();
-                let c_x = (free_camera_area[0] - free_camera_area[2]) / 2.;
-                let c_y = (free_camera_area[1] - free_camera_area[3]) / 2.;
-                let center = sub([free_camera_area[0], free_camera_area[1]], [c_x, c_y]);
-                self.camera.move_to(vec2_normalized(dir), 150.);
+            if center.distance(screen_y) > 150. {
+                direction = add(direction, [0., screen_y.y - center.y]);
             }
+
+            self.camera.move_to(vec2_normalized(direction), 200.);
         }
 
         Ok(())
@@ -346,8 +340,8 @@ impl Scene for Play {
         let iter_x = (W_WIDTH / tile_width) as i32;
         let iter_y = (W_HEIGHT / tile_height) as i32;
         let t = ctx.transform.trans(pos[0], pos[1]);
-        for i in 0 .. iter_x {
-            for j in 0 .. iter_y {
+        for i in 0..iter_x {
+            for j in 0..iter_y {
                 let rect = [0. + tile_width * i as f64, 0. + tile_height * j as f64, tile_width, tile_height];
                 self.render_texture("floor", rect, t, graphics, asset_manager);
             }
@@ -374,6 +368,7 @@ impl Scene for Play {
             obj.look_at(cursor);
         }
 
+        // Shadow-casting
         {
             let source = if let Some(obj) = self.player() {
                 self.camera.world_to_screen(obj.get_pos())
@@ -387,6 +382,23 @@ impl Scene for Play {
                 0.
             };
 
+            fn add_auxiliary_angles(current: &cgmath::Point2<f64>, prev: &cgmath::Point2<f64>, next: &cgmath::Point2<f64>, angles: &mut Vec<Angle>, aux_angle: f64, angle: f64) {
+                let direction = [angle.cos(), angle.sin()];
+                let prev_vec = sub(current.clone().into(), prev.clone().into());
+                let next_vec = sub(next.clone().into(), current.clone().into());
+                let projection_axis = perp(direction);
+                let p_1 = vec2_dot(prev_vec, projection_axis);
+                let p_2 = vec2_dot(next_vec, projection_axis);
+
+                if p_1 >= 0. && p_2 <= 0. {
+                    // counter-clockwise
+                    angles.push(Angle { rad: angle + aux_angle, color: GREEN });
+                } else if p_1 <= 0. && p_2 >= 0. {
+                    // clockwise
+                    angles.push(Angle { rad: angle - aux_angle, color: BLUE });
+                }
+            }
+
             let mut angles = vec![];
             let mut intersects = vec![];
             for obj in self.objects.iter() {
@@ -395,20 +407,34 @@ impl Scene for Play {
                     let screen_pos = self.camera.world_to_screen(obj.get_pos());
                     let corners = collision_box.get_bound().to_corners();
 
-                    for corner in corners.iter() {
-                        let corner_screen = add([corner.x, corner.y], screen_pos);
+                    for (i, corner) in corners.iter().enumerate() {
+                        let prev_index = if i == 0 {
+                            corners.len() - 1
+                        } else {
+                            i - 1
+                        };
+
+                        let next_index = if i + 1 == corners.len() {
+                            0
+                        } else {
+                            i + 1
+                        };
+
+                        let ref prev = corners[prev_index];
+                        let ref next = corners[next_index];
+
+                        let corner_screen = add(corner.clone().into(), screen_pos);
                         let n = vec2_normalized(sub(corner_screen, source));
                         let angle = n[1].atan2(n[0]);
 
-                        angles.push(angle);
-                        angles.push(angle - 0.00001);
-                        angles.push(angle + 0.00001);
+                        angles.push(Angle { rad: angle, color: RED });
+                        add_auxiliary_angles(corner, prev, next, &mut angles, 0.01, angle);
                     }
                 }
             }
 
             for angle in angles.iter() {
-                let direction = [angle.cos(), angle.sin()];
+                let direction = [angle.rad.cos(), angle.rad.sin()];
                 let ray = cgcoll::Ray2::new(source.into(), direction.into());
 
                 let mut closest_intersect: Option<cgmath::Point2<f64>> = None;
@@ -418,7 +444,23 @@ impl Scene for Play {
                         let screen_pos = self.camera.world_to_screen(obj.get_pos());
                         let transform = transform(screen_pos[0], screen_pos[1], 0.);
 
-                        if let Some(result) = collision_box.intersection_transformed(&ray, &transform) {
+                        let result = collision_box.intersection_transformed(&ray, &transform)
+                            .or_else(|| {
+                                // Dummy correction for ray intersection
+                                for (i, corner) in collision_box.get_bound().to_corners().iter().enumerate() {
+                                    let corner_screen = add(corner.clone().into(), screen_pos);
+                                    let n = vec2_normalized(sub(corner_screen, source));
+                                    let _angle = n[1].atan2(n[0]);
+
+                                    if angle.rad == _angle {
+                                        return Some(cgmath::Point2::from(corner_screen));
+                                    }
+                                }
+
+                                None
+                            });
+
+                        if let Some(result) = result {
                             if let Some(closest) = closest_intersect {
                                 let closest_dist = closest.distance(source.into());
                                 let dist = result.distance(source.into());
@@ -434,7 +476,7 @@ impl Scene for Play {
                 }
 
                 if let Some(closest) = closest_intersect {
-                    intersects.push(Intersection { angle: angle.clone(), point: closest });
+                    intersects.push(Intersection { angle: Angle { color: angle.color, rad: angle.rad }, point: closest });
                     /* Some tries to decrease counts of intersection points
                        idea: deal only with closest corners
 
@@ -458,11 +500,13 @@ impl Scene for Play {
             }
 
             intersects.sort_by(|a, b| {
-                b.angle.partial_cmp(&a.angle).unwrap_or(Ordering::Equal)
+                b.angle.rad.partial_cmp(&a.angle.rad).unwrap_or(Ordering::Equal)
             });
 
             let grey = [0.2, 0.2, 0.2, 0.2];
-            for (i, &Intersection { angle: _, point: p }) in intersects.iter().enumerate() {
+            let polygon = Polygon::new(grey);
+            for (i, &Intersection { angle: ref angle, point: p }) in intersects.iter().enumerate() {
+                let line = Line::new(angle.color.clone(), 0.5);
                 if intersects.len() > i + 1 {
                     let next = intersects[i + 1].point;
                     let polygon_points = [
@@ -470,7 +514,7 @@ impl Scene for Play {
                         [next.x, next.y],
                         [source[0], source[1]]
                     ];
-                    polygon(grey, &polygon_points, ctx.transform.clone(), graphics);
+                    polygon.draw_tri(&polygon_points, &ctx.draw_state, ctx.transform.clone(), graphics);
                 }
 
                 // last triangle end-start
@@ -481,10 +525,11 @@ impl Scene for Play {
                         [first.x, first.y],
                         [source[0], source[1]]
                     ];
-                    polygon(grey, &polygon_points, ctx.transform.clone(), graphics);
+                    polygon.draw_tri(&polygon_points, &ctx.draw_state, ctx.transform.clone(), graphics);
                 }
 
-                rectangle(WHITE, rectangle::centered_square(p.x, p.y, 2.), ctx.transform.clone(), graphics);
+                //line.draw([source[0], source[1], p.x, p.y], &ctx.draw_state, ctx.transform.clone(), graphics);
+                //rectangle(WHITE, rectangle::centered_square(p.x, p.y, 2.), ctx.transform.clone(), graphics);
             }
         }
 
@@ -492,10 +537,15 @@ impl Scene for Play {
             let rot = self.player().unwrap().rotation.clone();
             let pos = self.player().unwrap().get_pos();
             let screen_pos = self.camera.world_to_screen(pos);
-            let player_transform = multiply(ctx.transform, translate(screen_pos)).rot_rad(rot);
+            let player_transform = multiply(ctx.transform, translate(screen_pos));
 
             let rect = rectangle::centered_square(0.0, 0.0, 50.0);
-            self.render_texture("player_sprite", rect, player_transform, graphics, asset_manager);
+            self.render_texture("player_sprite", rect, player_transform.rot_rad(rot), graphics, asset_manager);
+
+            // may be FOV in the nearest future
+            let ellipse = Ellipse::new_border(BLUE, 0.5);
+            let circle = ellipse::circle(0.0, 0.0, 200.0);
+            ellipse.draw(circle, &ctx.draw_state, player_transform, graphics);
         }
 
         Ok(())
