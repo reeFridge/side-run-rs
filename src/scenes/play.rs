@@ -12,9 +12,7 @@ use piston_window::math::*;
 use piston_window::types::Rectangle as Rect;
 use cgmath;
 use collision as cgcoll;
-use collision::ContinuousTransformed;
-use collision::DiscreteTransformed;
-use collision::HasAabb;
+use collision::{ContinuousTransformed, DiscreteTransformed, Contains, HasAabb};
 use cgmath::MetricSpace;
 use cgmath::Rotation;
 use std::cmp::Ordering;
@@ -49,16 +47,18 @@ impl Position for Vec2d {
     }
 }
 
+#[derive(Clone)]
 struct GameObject {
     pos: Vec2d,
     rotation: f64,
     color: Color,
     velocity: Vec2d,
-    rect: Option<Rect>
+    collider: Option<Rect>,
+    collides: bool
 }
 
 impl GameObject {
-    fn new(x: f64, y: f64, color: Color, wh: Option<(f64, f64)>) -> GameObject {
+    fn new(x: f64, y: f64, color: Color, wh: Option<(f64, f64)>, collides: bool) -> GameObject {
         let mut rect = None;
 
         if let Some((hw, hh)) = wh {
@@ -70,23 +70,30 @@ impl GameObject {
             pos: Vec2d::from([x, y]),
             color: color,
             velocity: Vec2d::from([0., 0.]),
-            rect: rect
+            collider: rect,
+            collides
         }
     }
 
-    fn get_shape(&self) -> Option<Rect> {
-        self.rect.clone()
+    fn get_collider(&self) -> Option<Rect> {
+        self.collider.clone()
     }
 
     fn get_pos(&self) -> Vec2d {
         self.pos.clone()
     }
 
-    fn update_velocity(&mut self, dt: f64) {
+    fn update_position<F>(&mut self, dt: f64, collide: F)
+        where F: Fn(&Vec2d) -> bool {
         if vec2_len(self.velocity) > 0.5 {
             let transform = translate(mul_scalar(self.velocity, dt));
             let friction = 0.8;
-            self.pos = transform_pos(transform, self.pos);
+            let new_pos = transform_pos(transform, self.pos);
+
+            if !collide(&new_pos) {
+                self.pos = new_pos;
+            }
+
             self.velocity = mul_scalar(self.velocity, friction);
         } else {
             self.velocity = Vec2d::from([0., 0.]);
@@ -149,21 +156,21 @@ struct Intersection {
 impl Play {
     pub fn new(auto_connect: Option<String>, player_config: PlayerConfig) -> Play {
         let objects = vec![
-            GameObject::new(400.0, 300.0, WHITE, Some((W_WIDTH / 2., W_HEIGHT / 2.))),
-            GameObject::new(200.0, 300.0, WHITE, Some((100., 10.))),
-            GameObject::new(500.0, 100.0, RED, Some((10., 100.))),
-            GameObject::new(50.0, 40.0, GREEN, Some((100., 100.))),
-            GameObject::new(600.0, 600.0, BLUE, Some((100., 150.))),
-            GameObject::new(50.0, 500.0, BLUE, Some((50., 50.))),
-            GameObject::new(50.0, 650.0, WHITE, Some((50., 50.))),
-            GameObject::new(200.0, 500.0, RED, Some((50., 50.))),
-            GameObject::new(200.0, 650.0, GREEN, Some((50., 50.)))
+            GameObject::new(400.0, 300.0, WHITE, Some((W_WIDTH / 2., W_HEIGHT / 2.)), false),
+            GameObject::new(200.0, 300.0, WHITE, Some((100., 10.)), true),
+            GameObject::new(500.0, 100.0, RED, Some((10., 100.)), true),
+            GameObject::new(50.0, 40.0, GREEN, Some((100., 100.)), true),
+            GameObject::new(600.0, 600.0, BLUE, Some((100., 150.)), true),
+            GameObject::new(50.0, 500.0, BLUE, Some((50., 50.)), true),
+            GameObject::new(50.0, 650.0, WHITE, Some((50., 50.)), true),
+            GameObject::new(200.0, 500.0, RED, Some((50., 50.)), true),
+            GameObject::new(200.0, 650.0, GREEN, Some((50., 50.)), true)
         ];
 
         let mut play = Play {
             switcher: BaseSwitcher::new(None),
             objects: objects,
-            camera: GameObject::new(0., 0., BLUE, None),
+            camera: GameObject::new(0., 0., BLUE, None, false),
             players: HashMap::new(),
             free_area: Rect::from([200., 150., 600., 450.]),
             connection: None,
@@ -208,7 +215,7 @@ impl Play {
 
     fn spawn_player(&mut self, token: NetToken, pos: Vec2d, name: String, color: Color) {
         let idx = self.objects.len();
-        self.objects.push(GameObject::new(pos[0], pos[1], color, None));
+        self.objects.push(GameObject::new(pos[0], pos[1], color, None, false));
 
         self.players.insert(token, Player {
             name: name,
@@ -282,11 +289,29 @@ impl Scene for Play {
     fn update(&mut self, dt: f64) -> GameResult<()> {
         self.button_tracker.update();
 
+        let mut colliders = self.objects.to_vec();
+        colliders.retain(|obj| obj.get_collider().is_some());
+
         for obj in self.objects.iter_mut() {
-            obj.update_velocity(dt);
+            obj.update_position(dt, |new_pos| -> bool {
+                for collider in colliders.iter() {
+                    if collider.collides {
+                        let rect = collider.get_collider().unwrap();
+                        let bound_box = cgcoll::primitive::Rectangle::new(rect[2], rect[3]).get_bound();
+                        // to local of collider transform
+                        let point = cgmath::Point2::<f64>::from(sub(new_pos.clone(), collider.get_pos()));
+
+                        if bound_box.contains(&point) {
+                            return true;
+                        }
+                    }
+                }
+
+                false
+            });
         }
 
-        self.camera.update_velocity(dt);
+        self.camera.update_position(dt, |_| false);
 
         if self.player().is_some() {
             let movement_keys = [
@@ -354,11 +379,11 @@ impl Scene for Play {
         rectangle([0., 0., 0., 0.96], rect, t, graphics);
 
         for obj in self.objects.iter() {
-            if let Some(shape) = obj.get_shape() {
+            if let Some(collider) = obj.get_collider() {
                 let screen_pos = self.camera.world_to_screen(obj.get_pos());
                 let pos = multiply(ctx.transform, translate(screen_pos)).rot_rad(obj.rotation);
                 let obj_border = Rectangle::new_border(obj.color.clone(), 0.5);
-                obj_border.draw(shape, &ctx.draw_state, pos, graphics);
+                obj_border.draw(collider, &ctx.draw_state, pos, graphics);
             }
         }
 
@@ -402,8 +427,8 @@ impl Scene for Play {
             let mut angles = vec![];
             let mut intersects = vec![];
             for obj in self.objects.iter() {
-                if let Some(shape) = obj.get_shape() {
-                    let collision_box = cgcoll::primitive::Rectangle::new(shape[2], shape[3]);
+                if let Some(collider) = obj.get_collider() {
+                    let collision_box = cgcoll::primitive::Rectangle::new(collider[2], collider[3]);
                     let screen_pos = self.camera.world_to_screen(obj.get_pos());
                     let corners = collision_box.get_bound().to_corners();
 
@@ -439,8 +464,8 @@ impl Scene for Play {
 
                 let mut closest_intersect: Option<cgmath::Point2<f64>> = None;
                 for obj in self.objects.iter() {
-                    if let Some(shape) = obj.get_shape() {
-                        let collision_box = cgcoll::primitive::Rectangle::new(shape[2], shape[3]);
+                    if let Some(collider) = obj.get_collider() {
+                        let collision_box = cgcoll::primitive::Rectangle::new(collider[2], collider[3]);
                         let screen_pos = self.camera.world_to_screen(obj.get_pos());
                         let transform = transform(screen_pos[0], screen_pos[1], 0.);
 
@@ -481,8 +506,8 @@ impl Scene for Play {
                        idea: deal only with closest corners
 
                     'objects: for obj in self.objects.iter() {
-                        if let Some(shape) = obj.get_shape() {
-                            let collision_box = cgcoll::primitive::Rectangle::new(shape[2], shape[3]);
+                        if let Some(collider) = obj.get_collider() {
+                            let collision_box = cgcoll::primitive::Rectangle::new(collider[2], collider[3]);
                             let screen_pos = self.camera.world_to_screen(obj.get_pos());
                             let corners = collision_box.get_bound().to_corners();
 
