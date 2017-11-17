@@ -12,7 +12,7 @@ use piston_window::math::*;
 use piston_window::types::Rectangle as Rect;
 use cgmath;
 use collision as cgcoll;
-use collision::{ContinuousTransformed, DiscreteTransformed, Contains, HasAabb};
+use collision::{Aabb, ContinuousTransformed, DiscreteTransformed, Contains, HasAabb};
 use cgmath::MetricSpace;
 use cgmath::Rotation;
 use std::cmp::Ordering;
@@ -53,16 +53,16 @@ struct GameObject {
     rotation: f64,
     color: Color,
     velocity: Vec2d,
-    collider: Option<Rect>,
+    bounding_box: Option<cgcoll::primitive::Rectangle<f64>>,
     collides: bool
 }
 
 impl GameObject {
     fn new(x: f64, y: f64, color: Color, wh: Option<(f64, f64)>, collides: bool) -> GameObject {
-        let mut rect = None;
+        let mut bounding_box = None;
 
         if let Some((hw, hh)) = wh {
-            rect = Some(rectangle::centered([0., 0., hw, hh]));
+            bounding_box = Some(cgcoll::primitive::Rectangle::new(hw * 2., hh * 2.));
         }
 
         GameObject {
@@ -70,33 +70,49 @@ impl GameObject {
             pos: Vec2d::from([x, y]),
             color: color,
             velocity: Vec2d::from([0., 0.]),
-            collider: rect,
+            bounding_box,
             collides
         }
     }
 
-    fn get_collider(&self) -> Option<Rect> {
-        self.collider.clone()
+    fn get_bound(&self) -> Option<cgcoll::primitive::Rectangle<f64>> {
+        self.bounding_box.clone()
     }
 
     fn get_pos(&self) -> Vec2d {
         self.pos.clone()
     }
 
-    fn update_position<F>(&mut self, dt: f64, collide: F)
-        where F: Fn(&Vec2d) -> bool {
+    fn update_position(&mut self, dt: f64, colliders: Option<&Vec<GameObject>>) {
         if vec2_len(self.velocity) > 0.5 {
             let transform = translate(mul_scalar(self.velocity, dt));
             let friction = 0.8;
             let new_pos = transform_pos(transform, self.pos);
 
-            if !collide(&new_pos) {
+            if let Some(ref colliders) = colliders {
+                if colliders.iter().any(|collider| GameObject::collides_with_at_pos(&new_pos, collider)) {
+                    self.velocity = Vec2d::from([0., 0.]);
+                } else {
+                    self.pos = new_pos;
+                }
+            } else {
                 self.pos = new_pos;
             }
 
             self.velocity = mul_scalar(self.velocity, friction);
         } else {
             self.velocity = Vec2d::from([0., 0.]);
+        }
+    }
+
+    fn collides_with_at_pos(pos: &Vec2d, other: &GameObject) -> bool {
+        if let Some(collider_rect) = other.get_bound() {
+            let bound_box = collider_rect.get_bound();
+            let point: cgmath::Point2<f64> = sub(pos.clone(), other.get_pos()).into();
+
+            other.collides && bound_box.contains(&point)
+        } else {
+            false
         }
     }
 
@@ -289,43 +305,34 @@ impl Scene for Play {
     fn update(&mut self, dt: f64) -> GameResult<()> {
         self.button_tracker.update();
 
-        let mut colliders = self.objects.to_vec();
-        colliders.retain(|obj| obj.get_collider().is_some());
+        // update objects positions according to collision with others
+        {
+            let mut colliders = self.objects.to_vec();
+            colliders.retain(|obj| obj.collides && obj.get_bound().is_some());
 
-        for obj in self.objects.iter_mut() {
-            obj.update_position(dt, |new_pos| -> bool {
-                for collider in colliders.iter() {
-                    if collider.collides {
-                        let rect = collider.get_collider().unwrap();
-                        let bound_box = cgcoll::primitive::Rectangle::new(rect[2], rect[3]).get_bound();
-                        // to local of collider transform
-                        let point = cgmath::Point2::<f64>::from(sub(new_pos.clone(), collider.get_pos()));
-
-                        if bound_box.contains(&point) {
-                            return true;
-                        }
-                    }
-                }
-
-                false
-            });
+            for obj in self.objects.iter_mut() {
+                obj.update_position(dt, Some(&colliders));
+            }
         }
 
-        self.camera.update_position(dt, |_| false);
+        self.camera.update_position(dt, None);
 
-        if self.player().is_some() {
-            let movement_keys = [
-                Key::Up,
-                Key::Down,
-                Key::Left,
-                Key::Right
-            ];
+        // handle control keys
+        {
+            if self.player().is_some() {
+                let movement_keys = [
+                    Key::Up,
+                    Key::Down,
+                    Key::Left,
+                    Key::Right
+                ];
 
-            for key in movement_keys.iter() {
-                let key_pressed = self.button_tracker.current_pressed(&Button::Keyboard(key.clone()));
+                for key in movement_keys.iter() {
+                    let key_pressed = self.button_tracker.current_pressed(&Button::Keyboard(key.clone()));
 
-                if key_pressed {
-                    self.player_mut().unwrap().move_to(Vec2d::from(Direction::from(key.clone())), 200.);
+                    if key_pressed {
+                        self.player_mut().unwrap().move_to(Vec2d::from(Direction::from(key.clone())), 200.);
+                    }
                 }
             }
         }
@@ -360,35 +367,44 @@ impl Scene for Play {
     fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d, asset_manager: &mut AssetManager) -> GameResult<()> {
         clear(BLACK, graphics);
 
-        let pos = self.camera.world_to_screen([-100., -200.]);
-        let (tile_width, tile_height) = (200., 200.);
-        let iter_x = (W_WIDTH / tile_width) as i32;
-        let iter_y = (W_HEIGHT / tile_height) as i32;
-        let t = ctx.transform.trans(pos[0], pos[1]);
-        for i in 0..iter_x {
-            for j in 0..iter_y {
-                let rect = [0. + tile_width * i as f64, 0. + tile_height * j as f64, tile_width, tile_height];
-                self.render_texture("floor", rect, t, graphics, asset_manager);
+        // draw floor tiles
+        {
+            let pos = self.camera.world_to_screen([-100., -200.]);
+            let (tile_width, tile_height) = (200., 200.);
+            let iter_x = (W_WIDTH / tile_width) as i32;
+            let iter_y = (W_HEIGHT / tile_height) as i32;
+            let t = ctx.transform.trans(pos[0], pos[1]);
+            for i in 0..iter_x {
+                for j in 0..iter_y {
+                    let rect = [0. + tile_width * i as f64, 0. + tile_height * j as f64, tile_width, tile_height];
+                    self.render_texture("floor", rect, t, graphics, asset_manager);
+                }
             }
+
+            // turn texture to black
+            let pos = self.camera.world_to_screen([400., 300.]);
+            let t = ctx.transform.trans(pos[0], pos[1]);
+            let rect = rectangle::centered([0., 0., W_WIDTH / 2., W_HEIGHT / 2.]);
+            rectangle([0., 0., 0., 0.96], rect, t, graphics);
         }
 
-        // turn texture to black
-        let pos = self.camera.world_to_screen([400., 300.]);
-        let t = ctx.transform.trans(pos[0], pos[1]);
-        let rect = rectangle::centered([0., 0., W_WIDTH / 2., W_HEIGHT / 2.]);
-        rectangle([0., 0., 0., 0.96], rect, t, graphics);
+        // draw bounding boxes of objects
+        {
+            for obj in self.objects.iter() {
+                if let Some(b_box) = obj.get_bound() {
+                    let screen_pos = self.camera.world_to_screen(obj.get_pos());
+                    let pos = multiply(ctx.transform, translate(screen_pos)).rot_rad(obj.rotation);
+                    let obj_border = Rectangle::new_border(obj.color.clone(), 0.5);
 
-        for obj in self.objects.iter() {
-            if let Some(collider) = obj.get_collider() {
-                let screen_pos = self.camera.world_to_screen(obj.get_pos());
-                let pos = multiply(ctx.transform, translate(screen_pos)).rot_rad(obj.rotation);
-                let obj_border = Rectangle::new_border(obj.color.clone(), 0.5);
-                obj_border.draw(collider, &ctx.draw_state, pos, graphics);
+                    let b_box = b_box.get_bound();
+                    let (min, max) = (b_box.min(), b_box.max());
+                    let rect = [min.x, min.y, max.x * 2., max.y * 2.];
+                    obj_border.draw(rect, &ctx.draw_state, pos, graphics);
+                }
             }
         }
 
         let cursor = self.camera.screen_to_world(self.cursor);
-
         if let Some(obj) = self.player_mut() {
             obj.look_at(cursor);
         }
@@ -426,151 +442,156 @@ impl Scene for Play {
 
             let mut angles = vec![];
             let mut intersects = vec![];
-            for obj in self.objects.iter() {
-                if let Some(collider) = obj.get_collider() {
-                    let collision_box = cgcoll::primitive::Rectangle::new(collider[2], collider[3]);
-                    let screen_pos = self.camera.world_to_screen(obj.get_pos());
-                    let corners = collision_box.get_bound().to_corners();
 
-                    for (i, corner) in corners.iter().enumerate() {
-                        let prev_index = if i == 0 {
-                            corners.len() - 1
-                        } else {
-                            i - 1
-                        };
+            // get all angles of corners of all objects
+            {
+                for obj in self.objects.iter() {
+                    if let Some(rect_collider) = obj.get_bound() {
+                        let screen_pos = self.camera.world_to_screen(obj.get_pos());
+                        let corners = rect_collider.get_bound().to_corners();
 
-                        let next_index = if i + 1 == corners.len() {
-                            0
-                        } else {
-                            i + 1
-                        };
+                        for (i, corner) in corners.iter().enumerate() {
+                            let prev_index = if i == 0 {
+                                corners.len() - 1
+                            } else {
+                                i - 1
+                            };
 
-                        let ref prev = corners[prev_index];
-                        let ref next = corners[next_index];
+                            let next_index = if i + 1 == corners.len() {
+                                0
+                            } else {
+                                i + 1
+                            };
 
-                        let corner_screen = add(corner.clone().into(), screen_pos);
-                        let n = vec2_normalized(sub(corner_screen, source));
-                        let angle = n[1].atan2(n[0]);
+                            let ref prev = corners[prev_index];
+                            let ref next = corners[next_index];
 
-                        angles.push(Angle { rad: angle, color: RED });
-                        add_auxiliary_angles(corner, prev, next, &mut angles, 0.01, angle);
+                            let corner_screen = add(corner.clone().into(), screen_pos);
+                            let n = vec2_normalized(sub(corner_screen, source));
+                            let angle = n[1].atan2(n[0]);
+
+                            angles.push(Angle { rad: angle, color: RED });
+                            add_auxiliary_angles(corner, prev, next, &mut angles, 0.01, angle);
+                        }
                     }
                 }
             }
 
-            for angle in angles.iter() {
-                let direction = [angle.rad.cos(), angle.rad.sin()];
-                let ray = cgcoll::Ray2::new(source.into(), direction.into());
+            // find all intersection points by each angle
+            {
+                for angle in angles.iter() {
+                    let direction = [angle.rad.cos(), angle.rad.sin()];
+                    let ray = cgcoll::Ray2::new(source.into(), direction.into());
 
-                let mut closest_intersect: Option<cgmath::Point2<f64>> = None;
-                for obj in self.objects.iter() {
-                    if let Some(collider) = obj.get_collider() {
-                        let collision_box = cgcoll::primitive::Rectangle::new(collider[2], collider[3]);
-                        let screen_pos = self.camera.world_to_screen(obj.get_pos());
-                        let transform = transform(screen_pos[0], screen_pos[1], 0.);
+                    let mut closest_intersect: Option<cgmath::Point2<f64>> = None;
 
-                        let result = collision_box.intersection_transformed(&ray, &transform)
-                            .or_else(|| {
-                                // Dummy correction for ray intersection
-                                for (i, corner) in collision_box.get_bound().to_corners().iter().enumerate() {
-                                    let corner_screen = add(corner.clone().into(), screen_pos);
-                                    let n = vec2_normalized(sub(corner_screen, source));
-                                    let _angle = n[1].atan2(n[0]);
+                    // find closest intersection point from source by ray
+                    {
+                        for obj in self.objects.iter() {
+                            if let Some(rect_collider) = obj.get_bound() {
+                                let screen_pos = self.camera.world_to_screen(obj.get_pos());
+                                let transform = transform(screen_pos[0], screen_pos[1], 0.);
 
-                                    if angle.rad == _angle {
-                                        return Some(cgmath::Point2::from(corner_screen));
+                                let result = rect_collider.intersection_transformed(&ray, &transform)
+                                    .or_else(|| {
+                                        // Dummy correction for ray intersection
+                                        for (i, corner) in rect_collider.get_bound().to_corners().iter().enumerate() {
+                                            let corner_screen = add(corner.clone().into(), screen_pos);
+                                            let n = vec2_normalized(sub(corner_screen, source));
+                                            let _angle = n[1].atan2(n[0]);
+
+                                            if angle.rad == _angle {
+                                                return Some(cgmath::Point2::from(corner_screen));
+                                            }
+                                        }
+
+                                        None
+                                    });
+
+                                if let Some(result) = result {
+                                    if let Some(closest) = closest_intersect {
+                                        let closest_dist = closest.distance(source.into());
+                                        let dist = result.distance(source.into());
+
+                                        if dist < closest_dist {
+                                            closest_intersect = Some(result);
+                                        }
+                                    } else {
+                                        closest_intersect = Some(result);
                                     }
                                 }
-
-                                None
-                            });
-
-                        if let Some(result) = result {
-                            if let Some(closest) = closest_intersect {
-                                let closest_dist = closest.distance(source.into());
-                                let dist = result.distance(source.into());
-
-                                if dist < closest_dist {
-                                    closest_intersect = Some(result);
-                                }
-                            } else {
-                                closest_intersect = Some(result);
                             }
                         }
                     }
-                }
 
-                if let Some(closest) = closest_intersect {
-                    intersects.push(Intersection { angle: Angle { color: angle.color, rad: angle.rad }, point: closest });
-                    /* Some tries to decrease counts of intersection points
-                       idea: deal only with closest corners
+                    if let Some(closest) = closest_intersect {
+                        intersects.push(Intersection { angle: Angle { color: angle.color, rad: angle.rad }, point: closest });
+                        /* Some tries to decrease counts of intersection points
+                           idea: deal only with closest corners
 
-                    'objects: for obj in self.objects.iter() {
-                        if let Some(collider) = obj.get_collider() {
-                            let collision_box = cgcoll::primitive::Rectangle::new(collider[2], collider[3]);
-                            let screen_pos = self.camera.world_to_screen(obj.get_pos());
-                            let corners = collision_box.get_bound().to_corners();
+                        'objects: for obj in self.objects.iter() {
+                            if let Some(collider) = obj.get_collider() {
+                                let collision_box = cgcoll::primitive::Rectangle::new(collider[2], collider[3]);
+                                let screen_pos = self.camera.world_to_screen(obj.get_pos());
+                                let corners = collision_box.get_bound().to_corners();
 
-                            'corners: for corner in corners.iter() {
-                                let corner_screen = add([corner.x, corner.y], screen_pos);
+                                'corners: for corner in corners.iter() {
+                                    let corner_screen = add([corner.x, corner.y], screen_pos);
 
-                                if closest.distance(corner_screen.into()) < 0.5 {
-                                    intersects.push(Intersection { angle: angle.clone(), point: closest });
-                                    break 'objects;
+                                    if closest.distance(corner_screen.into()) < 0.5 {
+                                        intersects.push(Intersection { angle: angle.clone(), point: closest });
+                                        break 'objects;
+                                    }
                                 }
                             }
-                        }
-                    }*/
+                        }*/
+                    }
                 }
             }
 
+
             intersects.sort_by(|a, b| {
-                b.angle.rad.partial_cmp(&a.angle.rad).unwrap_or(Ordering::Equal)
+                a.angle.rad.partial_cmp(&b.angle.rad).unwrap_or(Ordering::Equal)
             });
 
-            let grey = [0.2, 0.2, 0.2, 0.2];
-            let polygon = Polygon::new(grey);
-            for (i, &Intersection { angle: ref angle, point: p }) in intersects.iter().enumerate() {
-                let line = Line::new(angle.color.clone(), 0.5);
-                if intersects.len() > i + 1 {
-                    let next = intersects[i + 1].point;
-                    let polygon_points = [
-                        [p.x, p.y],
-                        [next.x, next.y],
-                        [source[0], source[1]]
-                    ];
-                    polygon.draw_tri(&polygon_points, &ctx.draw_state, ctx.transform.clone(), graphics);
-                }
+            // fill visible area by color (transparent grey) drawing polygons for each triangle
+            {
+                let grey = [0.2, 0.2, 0.2, 0.2];
+                let polygon = Polygon::new(grey);
+                for (i, &Intersection { angle: ref angle, point: p }) in intersects.iter().enumerate() {
+                    if intersects.len() > i + 1 {
+                        let next = intersects[i + 1].point;
+                        let polygon_points = [p.into(), next.into(), source];
+                        polygon.draw_tri(&polygon_points, &ctx.draw_state, ctx.transform.clone(), graphics);
+                    }
 
-                // last triangle end-start
-                if i == intersects.len() - 1 {
-                    let first = intersects[0].point;
-                    let polygon_points = [
-                        [p.x, p.y],
-                        [first.x, first.y],
-                        [source[0], source[1]]
-                    ];
-                    polygon.draw_tri(&polygon_points, &ctx.draw_state, ctx.transform.clone(), graphics);
+                    /*let line = Line::new(angle.color.clone(), 0.5);
+                    line.draw([source[0], source[1], p.x, p.y], &ctx.draw_state, ctx.transform.clone(), graphics);
+                    rectangle(WHITE, rectangle::centered_square(p.x, p.y, 2.), ctx.transform.clone(), graphics);*/
                 }
-
-                //line.draw([source[0], source[1], p.x, p.y], &ctx.draw_state, ctx.transform.clone(), graphics);
-                //rectangle(WHITE, rectangle::centered_square(p.x, p.y, 2.), ctx.transform.clone(), graphics);
+                let first = intersects.first().unwrap().point;
+                let last = intersects.last().unwrap().point;
+                let polygon_points: [Vec2d; 3] = [first.into(), last.into(), source];
+                polygon.draw_tri(&polygon_points, &ctx.draw_state, ctx.transform.clone(), graphics);
             }
         }
 
-        if self.player().is_some() {
-            let rot = self.player().unwrap().rotation.clone();
-            let pos = self.player().unwrap().get_pos();
-            let screen_pos = self.camera.world_to_screen(pos);
-            let player_transform = multiply(ctx.transform, translate(screen_pos));
+        // Draw player sprite and FOV area
+        {
+            if self.player().is_some() {
+                let rot = self.player().unwrap().rotation.clone();
+                let pos = self.player().unwrap().get_pos();
+                let screen_pos = self.camera.world_to_screen(pos);
+                let player_transform = multiply(ctx.transform, translate(screen_pos));
 
-            let rect = rectangle::centered_square(0.0, 0.0, 50.0);
-            self.render_texture("player_sprite", rect, player_transform.rot_rad(rot), graphics, asset_manager);
+                let rect = rectangle::centered_square(0.0, 0.0, 50.0);
+                self.render_texture("player_sprite", rect, player_transform.rot_rad(rot), graphics, asset_manager);
 
-            // may be FOV in the nearest future
-            let ellipse = Ellipse::new_border(BLUE, 0.5);
-            let circle = ellipse::circle(0.0, 0.0, 200.0);
-            ellipse.draw(circle, &ctx.draw_state, player_transform, graphics);
+                // may be FOV in the nearest future
+                let ellipse = Ellipse::new_border(BLUE, 0.5);
+                let circle = ellipse::circle(0.0, 0.0, 200.0);
+                ellipse.draw(circle, &ctx.draw_state, player_transform, graphics);
+            }
         }
 
         Ok(())
