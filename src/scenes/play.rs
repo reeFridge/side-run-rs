@@ -161,11 +161,19 @@ pub struct Play {
 
 struct Angle {
     rad: f64,
-    color: Color
+    color: Color,
+    aux: bool
+}
+
+impl Angle {
+    fn is_aux(&self) -> bool {
+        self.aux
+    }
 }
 
 struct Intersection {
-    angle: Angle,
+    angle: f64,
+    color: Color,
     point: cgmath::Point2<f64>
 }
 
@@ -416,7 +424,6 @@ impl Scene for Play {
             } else {
                 self.cursor
             };
-
             let rotation = if let Some(obj) = self.player() {
                 obj.rotation.clone()
             } else {
@@ -431,58 +438,62 @@ impl Scene for Play {
                 let p_1 = vec2_dot(prev_vec, projection_axis);
                 let p_2 = vec2_dot(next_vec, projection_axis);
 
+                /*
+
+                       * ray_origin
+                      /
+                     /
+                    /
+                   /
+              \   /
+    proj_axis  \ /  prev_vec
+      current_p *<-----------* prev_p
+                |\           ^
+                | \          |
+                |            |
+       next_vec |            |
+                |            |
+                v            |
+         next_p *----------->*
+
+                */
                 if p_1 >= 0. && p_2 <= 0. {
                     // counter-clockwise
-                    angles.push(Angle { rad: angle + aux_angle, color: GREEN });
+                    angles.push(Angle { rad: angle + aux_angle, color: GREEN, aux: true });
                 } else if p_1 <= 0. && p_2 >= 0. {
                     // clockwise
-                    angles.push(Angle { rad: angle - aux_angle, color: BLUE });
+                    angles.push(Angle { rad: angle - aux_angle, color: BLUE, aux: true });
                 }
             }
 
             let mut angles = vec![];
-            let mut intersects = vec![];
 
             // get all angles of corners of all objects
             {
-                for obj in self.objects.iter() {
+                for (j, obj) in self.objects.iter().enumerate() {
                     if let Some(rect_collider) = obj.get_bound() {
                         let screen_pos = self.camera.world_to_screen(obj.get_pos());
                         let corners = rect_collider.get_bound().to_corners();
 
                         for (i, corner) in corners.iter().enumerate() {
-                            let prev_index = if i == 0 {
-                                corners.len() - 1
-                            } else {
-                                i - 1
-                            };
-
-                            let next_index = if i + 1 == corners.len() {
-                                0
-                            } else {
-                                i + 1
-                            };
-
-                            let ref prev = corners[prev_index];
-                            let ref next = corners[next_index];
-
                             let corner_screen = add(corner.clone().into(), screen_pos);
                             let n = vec2_normalized(sub(corner_screen, source));
                             let angle = n[1].atan2(n[0]);
 
-                            angles.push(Angle { rad: angle, color: RED });
-                            add_auxiliary_angles(corner, prev, next, &mut angles, 0.01, angle);
+                            angles.push(Angle { rad: angle, color: RED, aux: false });
                         }
                     }
                 }
             }
+
+            let mut intersects = vec![];
+            let mut aux_angles = vec![];
 
             // find all intersection points by each angle
             {
                 for angle in angles.iter() {
                     let direction = [angle.rad.cos(), angle.rad.sin()];
                     let ray = cgcoll::Ray2::new(source.into(), direction.into());
-
                     let mut closest_intersect: Option<cgmath::Point2<f64>> = None;
 
                     // find closest intersection point from source by ray
@@ -525,54 +536,111 @@ impl Scene for Play {
                     }
 
                     if let Some(closest) = closest_intersect {
-                        intersects.push(Intersection { angle: Angle { color: angle.color, rad: angle.rad }, point: closest });
-                        /* Some tries to decrease counts of intersection points
-                           idea: deal only with closest corners
-
-                        'objects: for obj in self.objects.iter() {
-                            if let Some(collider) = obj.get_collider() {
-                                let collision_box = cgcoll::primitive::Rectangle::new(collider[2], collider[3]);
+                        for obj in self.objects.iter() {
+                            if let Some(rect_collider) = obj.get_bound() {
                                 let screen_pos = self.camera.world_to_screen(obj.get_pos());
-                                let corners = collision_box.get_bound().to_corners();
+                                let corners = rect_collider.get_bound().to_corners();
 
-                                'corners: for corner in corners.iter() {
-                                    let corner_screen = add([corner.x, corner.y], screen_pos);
+                                for (i, corner) in corners.iter().enumerate() {
+                                    let corner_screen = add(corner.clone().into(), screen_pos);
+                                    let e = 0.0001;
 
-                                    if closest.distance(corner_screen.into()) < 0.5 {
-                                        intersects.push(Intersection { angle: angle.clone(), point: closest });
-                                        break 'objects;
+                                    if closest.distance(corner_screen.into()) < e {
+                                        intersects.push(Intersection { angle: angle.rad, point: closest, color: angle.color });
+
+                                        // aux angles
+                                        {
+                                            let prev_index = if i == 0 {
+                                                corners.len() - 1
+                                            } else {
+                                                i - 1
+                                            };
+                                            let next_index = if i + 1 == corners.len() {
+                                                0
+                                            } else {
+                                                i + 1
+                                            };
+
+                                            let ref prev = corners[prev_index];
+                                            let ref next = corners[next_index];
+
+                                            let corner_screen = add(corner.clone().into(), screen_pos);
+                                            let n = vec2_normalized(sub(corner_screen, source));
+                                            let angle = n[1].atan2(n[0]);
+
+                                            add_auxiliary_angles(corner, prev, next, &mut aux_angles, 0.01, angle);
+                                        }
                                     }
                                 }
                             }
-                        }*/
+                        }
                     }
                 }
             }
 
+            // do the same for aux angles
+            {
+                for angle in aux_angles.iter() {
+                    let direction = [angle.rad.cos(), angle.rad.sin()];
+                    let ray = cgcoll::Ray2::new(source.into(), direction.into());
+                    let mut closest_intersect: Option<cgmath::Point2<f64>> = None;
+
+                    // find closest intersection point from source by ray
+                    {
+                        for obj in self.objects.iter() {
+                            if let Some(rect_collider) = obj.get_bound() {
+                                let screen_pos = self.camera.world_to_screen(obj.get_pos());
+                                let transform = transform(screen_pos[0], screen_pos[1], 0.);
+
+                                if let Some(result) = rect_collider.intersection_transformed(&ray, &transform) {
+                                    if let Some(closest) = closest_intersect {
+                                        let closest_dist = closest.distance(source.into());
+                                        let dist = result.distance(source.into());
+
+                                        if dist < closest_dist {
+                                            closest_intersect = Some(result);
+                                        }
+                                    } else {
+                                        closest_intersect = Some(result);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(closest) = closest_intersect {
+                        intersects.push(Intersection { angle: angle.rad, point: closest, color: angle.color });
+                    }
+                }
+            }
 
             intersects.sort_by(|a, b| {
-                a.angle.rad.partial_cmp(&b.angle.rad).unwrap_or(Ordering::Equal)
+                a.angle.partial_cmp(&b.angle).unwrap_or(Ordering::Equal)
             });
 
             // fill visible area by color (transparent grey) drawing polygons for each triangle
             {
                 let grey = [0.2, 0.2, 0.2, 0.2];
                 let polygon = Polygon::new(grey);
-                for (i, &Intersection { angle: ref angle, point: p }) in intersects.iter().enumerate() {
+                for (i, &Intersection { angle: angle, color: color, point: p }) in intersects.iter().enumerate() {
                     if intersects.len() > i + 1 {
                         let next = intersects[i + 1].point;
                         let polygon_points = [p.into(), next.into(), source];
                         polygon.draw_tri(&polygon_points, &ctx.draw_state, ctx.transform.clone(), graphics);
                     }
 
-                    /*let line = Line::new(angle.color.clone(), 0.5);
-                    line.draw([source[0], source[1], p.x, p.y], &ctx.draw_state, ctx.transform.clone(), graphics);
-                    rectangle(WHITE, rectangle::centered_square(p.x, p.y, 2.), ctx.transform.clone(), graphics);*/
+                    //let line = Line::new(color, 0.5);
+                    //line.draw([source[0], source[1], p.x, p.y], &ctx.draw_state, ctx.transform.clone(), graphics);
+                    //rectangle(WHITE, rectangle::centered_square(p.x, p.y, 2.), ctx.transform.clone(), graphics);
                 }
-                let first = intersects.first().unwrap().point;
-                let last = intersects.last().unwrap().point;
-                let polygon_points: [Vec2d; 3] = [first.into(), last.into(), source];
-                polygon.draw_tri(&polygon_points, &ctx.draw_state, ctx.transform.clone(), graphics);
+
+                if let (Some(first), Some(last)) = (intersects.first(), intersects.last()) {
+                    let first = first.point;
+                    let last = last.point;
+
+                    let polygon_points: [Vec2d; 3] = [first.into(), last.into(), source];
+                    polygon.draw_tri(&polygon_points, &ctx.draw_state, ctx.transform.clone(), graphics);
+                }
             }
         }
 
