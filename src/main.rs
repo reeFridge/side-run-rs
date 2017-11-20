@@ -5,6 +5,7 @@ extern crate vecmath;
 extern crate cgmath;
 extern crate collision;
 extern crate button_tracker;
+extern crate specs;
 
 #[macro_use]
 extern crate conrod;
@@ -15,7 +16,7 @@ mod game_cycle;
 mod asset_manager;
 
 use piston_window::{PistonWindow, WindowSettings, TextureSettings, G2dTexture, Flip};
-use scenes::menu::Menu;
+use scenes::ecs_test;
 use game_cycle::GameCycle;
 use asset_manager::AssetManager;
 use std::path::Path;
@@ -58,8 +59,5 @@ pub fn main() {
 
         manager
     };
-
-    let scene = Box::new(Menu::new());
-
-    GameCycle::new(scene, asset_manager).run(&mut window);
+    GameCycle::new(ecs_test::instance(), asset_manager).run(&mut window);
 }

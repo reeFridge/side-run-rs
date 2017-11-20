@@ -12,3 +12,4 @@ vecmath = "0.3"
 cgmath = "0.15"
 collision = "0.12"
 piston-button_tracker = { path = "./libs/button_tracker" }
+specs = "0.10.0"
