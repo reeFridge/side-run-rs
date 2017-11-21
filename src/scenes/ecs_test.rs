@@ -1,17 +1,18 @@
 use scenes::common::*;
 use scenes::scene::{Scene, SceneInstance, BaseSwitcher, Switcher};
-use piston_window::{clear, Context, G2d, Rectangle, rectangle};
+use piston_window::{clear, Context, G2d, Rectangle, rectangle, Transformed, Button, Key};
 use cgmath::prelude::*;
 use cgmath::{Point2, Vector2};
 use collision::prelude::*;
 use collision::primitive;
 use asset_manager::AssetManager;
+use button_tracker::ButtonController;
 
 // specs
 //--------------------------------------------------------------------------------------------------
 use specs::{Component, DispatcherBuilder, Join, ReadStorage, System, VecStorage, WriteStorage, World, Dispatcher, Fetch};
 
-struct Vel(f32);
+struct Vel(Vector2<f32>);
 impl Component for Vel {
     type Storage = VecStorage<Self>;
 }
@@ -27,6 +28,30 @@ impl Component for Rot {
 }
 
 struct BoundingBox(primitive::Rectangle<f32>);
+
+impl BoundingBox {
+    fn draw(&self, pos: &Point2<f32>, context: &mut Context, graphics: &mut G2d) {
+        let bounding_box = &self.0;
+
+        let bound = bounding_box.get_bound();
+        let rect = Rectangle::new_border([1., 1., 0., 1.], 0.5);
+        let t = context.transform.trans(pos.x as f64, pos.y as f64);
+        let rect_params = rectangle::rectangle_by_corners(
+            bound.min().x as f64,
+            bound.min().y as f64,
+            bound.max().x as f64,
+            bound.max().y as f64
+        );
+
+        rect.draw(
+            rect_params,
+            &context.draw_state,
+            t,
+            graphics
+        );
+    }
+}
+
 impl Component for BoundingBox {
     type Storage = VecStorage<Self>;
 }
@@ -36,29 +61,97 @@ impl Component for Collides {
     type Storage = VecStorage<Self>;
 }
 
+struct PlayerController {
+    speed: f32
+}
+
+impl Component for PlayerController {
+    type Storage = VecStorage<Self>;
+}
+
 struct UpdatePos;
 
 impl<'a> System<'a> for UpdatePos {
-    // These are the resources required for execution.
-    // You can also define a struct and `#[derive(SystemData)]`,
-    // see the `full` example.
-    type SystemData = (WriteStorage<'a, Pos>, ReadStorage<'a, Vel>, Fetch<'a, DeltaTime>);
+    type SystemData = (WriteStorage<'a, Pos>, ReadStorage<'a, Vel>, Fetch<'a, DeltaTime>, Fetch<'a, InputTracker>);
 
     fn run(&mut self, data: Self::SystemData) {
-        let (mut pos, vel, delta) = data;
-        // The `.join()` combines multiple components,
-        // so we only access those entities which have
-        // both of them.
-        // You could also use `par_join()` to get a rayon `ParallelIterator`.
+        let (mut pos, vel, delta, inp) = data;
         let delta = delta.0 as f32;
 
         for (pos, vel) in (&mut pos, &vel).join() {
-            pos.0 += Vector2::new(vel.0, vel.0) * delta;
+            let vel_vec = &vel.0;
+            pos.0 += vel_vec * delta;
         }
     }
 }
 
+struct UpdateVel;
+
+impl<'a> System<'a> for UpdateVel {
+    type SystemData = WriteStorage<'a, Vel>;
+
+    fn run(&mut self, data: Self::SystemData) {
+        let mut vel = data;
+        let e = 0.5f32;
+        let deceleration = 0.85f32;
+
+        for vel in (&mut vel).join() {
+            let mut vel_vec = vel.0;
+
+            if !vel_vec.is_zero() {
+                let mut new_vec = vel_vec * deceleration;
+
+                if new_vec.magnitude() < e {
+                    new_vec = Vector2::zero();
+                }
+
+                *vel = Vel(new_vec);
+            }
+        }
+    }
+}
+
+
+struct Movement;
+
+impl<'a> System<'a> for Movement {
+    type SystemData = (WriteStorage<'a, Vel>, ReadStorage<'a, PlayerController>, Fetch<'a, InputTracker>);
+
+    fn run(&mut self, data: Self::SystemData) {
+        let (mut vel, controller, input) = data;
+
+        let movement_keys = [
+            Key::Up,
+            Key::Down,
+            Key::Left,
+            Key::Right
+        ];
+
+        for (vel, controller) in (&mut vel, &controller).join() {
+            for key in movement_keys.iter() {
+                let button = &Button::Keyboard(key.clone());
+                let mut vec = Vector2::<f32>::zero();
+
+                if input.0.current_pressed(button) {
+                    match key {
+                        &Key::Up => vec.y = -1.,
+                        &Key::Down => vec.y = 1.,
+                        &Key::Left => vec.x = -1.,
+                        &Key::Right => vec.x = 1.,
+                        _ => ()
+                    }
+                }
+
+                vel.0 += vec * controller.speed;
+            }
+        }
+    }
+}
+
+
+// Resources
 struct DeltaTime(f64);
+struct InputTracker(ButtonController);
 //--------------------------------------------------------------------------------------------------
 
 pub struct EcsTest<'a, 'b> {
@@ -73,34 +166,28 @@ pub fn instance() -> SceneInstance {
 
 impl<'a, 'b> EcsTest<'a, 'b> {
     fn new() -> EcsTest<'a, 'b> {
-        // The `World` is our
-        // container for components
-        // and other resources.
         let mut world = World::new();
         world.register::<Pos>();
         world.register::<Vel>();
         world.register::<Rot>();
         world.register::<Collides>();
         world.register::<BoundingBox>();
+        world.register::<PlayerController>();
 
         world.add_resource(DeltaTime(0.05));
+        world.add_resource(InputTracker(ButtonController::new()));
 
-        // An entity may or may not contain some component.
+        world.create_entity()
+            .with(Vel(Vector2::zero()))
+            .with(Pos(Point2::new(20., 20.)))
+            .with(BoundingBox(primitive::Rectangle::new(10., 10.)))
+            .with(PlayerController { speed: 20. })
+            .build();
 
-        world.create_entity().with(Vel(2.0)).with(Pos(Point2::new(0., 0.))).build();
-        world.create_entity().with(Vel(4.0)).with(Pos(Point2::new(0., 0.))).build();
-        world.create_entity().with(Vel(1.5)).with(Pos(Point2::new(0., 0.))).build();
-
-        // This entity does not have `Vel`, so it won't be dispatched.
-        world.create_entity().with(Pos(Point2::new(0., 0.))).build();
-
-        // This builds a dispatcher.
-        // The third parameter of `add` specifies
-        // logical dependencies on other systems.
-        // Since we only have one, we don't depend on anything.
-        // See the `full` example for dependencies.
         let mut dispatcher = DispatcherBuilder::new()
             .add(UpdatePos, "update_pos", &[])
+            .add(UpdateVel, "update_vel", &[])
+            .add(Movement, "movement", &[])
             .build();
 
         EcsTest {
@@ -119,32 +206,36 @@ impl<'a, 'b> Scene for EcsTest<'a, 'b> {
         let mut delta = self.world.write_resource::<DeltaTime>();
         *delta = DeltaTime(dt);
 
+        let mut input_tracker = self.world.write_resource::<InputTracker>();
+        input_tracker.0.update();
+
         Ok(())
     }
 
     fn draw(&mut self, ctx: &mut Context, graphics: &mut G2d, asset_manager: &mut AssetManager) -> GameResult<()> {
         clear(BLACK, graphics);
         let positions = self.world.read::<Pos>();
+        let bounding_boxes = self.world.read::<BoundingBox>();
 
         for entity in self.world.entities().join() {
-            if let Some(pos) = positions.get(entity) {
-                let rect = Rectangle::new([1., 0., 1., 1.]);
-                let pos = pos.0;
-
-                rect.draw(
-                    rectangle::centered_square(pos.x as f64, pos.y as f64, 10.),
-                    &ctx.draw_state,
-                    ctx.transform.clone(),
-                    graphics
-                );
+            if let (Some(pos), Some(bounding_box)) = (positions.get(entity), bounding_boxes.get(entity)) {
+                let pos = &pos.0;
+                bounding_box.draw(pos, ctx, graphics);
             }
         }
 
         Ok(())
     }
 
-    //fn key_press(&mut self, _button: Button) {()}
-    //fn key_release(&mut self, _button: Button) {()}
+    fn key_press(&mut self, button: Button) {
+        let mut tracker = self.world.write_resource::<InputTracker>();
+        tracker.0.register_press(&button);
+    }
+
+    fn key_release(&mut self, button: Button) {
+        let mut tracker = self.world.write_resource::<InputTracker>();
+        tracker.0.register_release(&button);
+    }
     //fn mouse_move(&mut self, _cursor: [f64; 2]) {()}
 
     fn switcher(&mut self) -> &mut Switcher {
