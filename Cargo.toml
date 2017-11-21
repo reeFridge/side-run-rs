@@ -5,8 +5,8 @@ authors = ["reeFridge <reefridgerator@gmail.com>"]
 
 [dependencies]
 byteorder = "1"
-piston_window = "0.70.0"
-conrod = { version = "0.55", features = ["piston"] }
+piston_window = "0.73.0"
+conrod = { version = "0.56", features = ["piston"] }
 find_folder = "0.3"
 vecmath = "0.3"
 cgmath = "0.15"
