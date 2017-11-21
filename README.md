@@ -13,6 +13,7 @@ Demo-like project where i'am trying to create something like *co-op-top-down-sid
   * `connect`, `spawn player`, `update player position` ... no more yet.
 * Basic shadow-casting
 * Movement, Side-scroll camera
+* Integration with ECS (specs)
   
 **Simple server implementation:** [gist](https://gist.github.com/reeFridge/055fb15bae40056d8b92c73965146c5b)
 
@@ -21,8 +22,5 @@ Demo-like project where i'am trying to create something like *co-op-top-down-sid
 * Now multiplayer is not primary goal.
 
 ### Build & Run
-
-Change version of dependence `pistoncore-input` in Cargo.toml of button_tracker submodule (libs/button_tracker) to 0.19.0
-for compatibility with `piston_window` and run: 
 
 `$ cargo run`
